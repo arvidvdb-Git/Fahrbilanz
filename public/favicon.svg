@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">
+  <rect width="40" height="40" rx="9" fill="#3D5740" />
+  <!-- Balance scale pedestal & fulcrum -->
+  <line x1="13" y1="34" x2="27" y2="34" stroke="#F3F6F4" stroke-width="2.2" stroke-linecap="round" />
+  <polygon points="16.5,34 20,25.5 23.5,34" fill="#9BC3A0" />
+  <!-- Scale balance beam -->
+  <line x1="5.5" y1="26" x2="34.5" y2="22" stroke="#F3F6F4" stroke-width="2.4" stroke-linecap="round" />
+  <!-- Left pan: Gasoline pump -->
+  <rect x="6" y="13.5" width="6.2" height="9" rx="1.2" fill="#F3F6F4" />
+  <rect x="7.3" y="15" width="3.6" height="2.4" rx="0.5" fill="#3D5740" />
+  <path d="M12.2 15.8H14V21" stroke="#F3F6F4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- Right pan: eDrive bolt -->
+  <polygon points="31.5,8.5 26,15 29.8,15 28.2,20.5 34.5,13.5 30.6,13.5" fill="#9BC3A0" />
+</svg>

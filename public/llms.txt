@@ -1,0 +1,28 @@
+# Fahrbilanz — Energy & Total Cost of Ownership (TCO) Vehicle Comparator
+
+> Fahrbilanz is a client-side interactive calculator and educational tool for comparing annual energy spending and multi-year total cost of ownership (1, 3, 5, or 8 years) across Gasoline, Diesel, Hybrid, and Full Electric vehicles in Europe.
+
+## Core Capabilities
+- **Two Comparison Scopes**:
+  - **Energy Cost Only** (default): Compares pure propulsion energy spend (fuel + blended Home AC, Public AC, and Public DC electricity tariffs, charging efficiency losses, and monthly charging subscription fees).
+  - **Total Cost of Ownership (TCO)**: Combines purchase price, optional EV/hybrid subsidies, resale/depreciation, wallbox installation, energy expenses, annual maintenance, road tax, and insurance.
+- **2-or-3 Vehicle Side-by-Side Comparison**: Compare Gasoline, Diesel, Hybrid, and Full Electric powertrains across Compact, Sedan, and SUV classes.
+- **Live EU Fuel Rates**: Automatically fetches official weekly retail petrol (Euro-Super 95) and diesel averages from the European Commission Weekly Oil Bulletin across European markets, matched to the selected interface language (EN -> EU Average, DE -> Germany, NL -> Netherlands, FR -> France) or manual country selection.
+- **Split Charging Tariff & Custom Mix Calculator**: Preset charging mixes (Home-Heavy 80/15/5, Mixed 50/30/20, Public Only 0/50/50) plus an unlocked Custom mode where individual AC/DC percentages can be tuned independently without automatic rescaling.
+- **1D & 2D Break-Even Sensitivity Analysis**:
+  - 1D sweep over fuel price (€/L), Home AC (€/kWh), Public DC (€/kWh), or blended electricity rate with colored winning zones and exact break-even crossovers.
+  - 2D Energy Winning Zone Map plotting Fuel Price (€/L) vs. Blended Charging Rate (€/kWh).
+  - Interactive Scenario Simulator allowing live tariff and charging-mix testing without altering the committed comparison table.
+
+## Supported Languages
+- English (`en`)
+- German (`de`)
+- Dutch (`nl`)
+- French (`fr`)
+
+## Legal, Privacy, Data Attribution & Accessibility
+- **Operator Contact**: `arvidvdbwbs@gmail.com` (`#/imprint` for Imprint / Impressum / Mentions Légales).
+- **Privacy & GDPR**: Zero personal data is saved, profiled, or shared by Fahrbilanz. All vehicle calculations execute locally in the user's browser; standard web server security logs (Google Cloud Run `europe-west3`) are disclosed under Art. 6(1)(f) GDPR along with full GDPR user rights (`#/privacy`).
+- **Official Fuel Data Source**: Average European retail petrol and diesel prices originate from the **European Commission Weekly Oil Bulletin** (`https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en`).
+- **Accessibility**: Built toward WCAG 2.1 AA with keyboard navigation, visible focus rings, ARIA landmarks, and reduced-motion support (`#/accessibility`).
+- **Disclaimer**: Output values and live bulletin averages are provided as an illustrative simulation for informational purposes only and do not constitute financial, tax, or legal advice.
