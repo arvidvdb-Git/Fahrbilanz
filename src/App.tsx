@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
@@ -6,12 +6,14 @@ import { initHeroCanvas } from './webgl/heroCanvas';
 import { initSpecsCanvas } from './webgl/specsCanvas';
 import {
   CAR_PRESETS,
+  GlobalAssumptions,
   POWERTRAIN_META,
   POWERTRAIN_ORDER,
   PowertrainId,
   calculateTco,
   createSlotFromPreset,
   formatEur,
+  getBlendedElectricityPrice,
 } from './data/cars';
 import {
   LANGUAGE_LABELS,
@@ -19,6 +21,7 @@ import {
   Language,
   TRANSLATIONS,
 } from './i18n/translations';
+import { LiveFuelFeed, fetchLiveFuelFeed } from './services/fuelPrices';
 import { CarSketch } from './components/CarSketch';
 import { ComparisonStudio } from './components/ComparisonStudio';
 
@@ -62,8 +65,8 @@ const SHOWCASE_MEDIA: ShowcaseMedia[] = [
   },
 ];
 
-const HERO_ASSUMPTIONS = {
-  comparisonMode: 'tco' as const,
+const HERO_BASE_ASSUMPTIONS: GlobalAssumptions = {
+  comparisonMode: 'tco',
   annualKm: 15000,
   years: 5,
   gasolinePrice: 1.75,
@@ -74,14 +77,25 @@ const HERO_ASSUMPTIONS = {
   homeAcShare: 70,
   publicAcShare: 20,
   publicDcShare: 10,
-  chargeLossPct: 10,
   monthlyChargingFee: 5,
   wallboxCost: 1200,
+  rentWallboxElectric: true,
+  rentWallboxHybrid: false,
+  buyWallboxElectric: true,
+  buyWallboxHybrid: false,
+};
+
+const LANG_DEFAULT_COUNTRY: Record<Language, string> = {
+  en: 'EU',
+  de: 'DE',
+  nl: 'NL',
+  fr: 'FR',
 };
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [lang, setLang] = useState<Language>('en');
+  const [langMenuOpen, setLangMenuOpen] = useState<boolean>(false);
   const [activeNav, setActiveNav] = useState<string>('');
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
@@ -91,6 +105,8 @@ export default function App() {
   const [splitPct, setSplitPct] = useState<number>(50);
   const [splitAnimate, setSplitAnimate] = useState<boolean>(false);
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
+  const [fuelFeed, setFuelFeed] = useState<LiveFuelFeed | null>(null);
+  const [fuelFeedLoading, setFuelFeedLoading] = useState<boolean>(true);
 
   type PageView = 'home' | 'privacy' | 'imprint' | 'accessibility';
 
@@ -125,6 +141,7 @@ export default function App() {
   });
 
   const headerRef = useRef<HTMLElement | null>(null);
+  const langDropdownRef = useRef<HTMLDivElement | null>(null);
   const heroCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const specsCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const heroStageRef = useRef<HTMLDivElement | null>(null);
@@ -137,8 +154,82 @@ export default function App() {
   const compWrapRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef<boolean>(false);
   const stageIdxRef = useRef<number>(0);
+  const showcaseTouchRef = useRef<{ x: number; y: number } | null>(null);
+  const heroSwatchesRef = useRef<HTMLDivElement | null>(null);
+  const swatchBtnRefs = useRef<Partial<Record<PowertrainId, HTMLButtonElement | null>>>({});
+  const [swatchSliderStyle, setSwatchSliderStyle] = useState<{
+    transform: string;
+    width: string;
+    height: string;
+    opacity: number;
+  }>({
+    transform: 'translate3d(0px, 0px, 0)',
+    width: '0px',
+    height: '0px',
+    opacity: 0,
+  });
 
   const t = TRANSLATIONS[lang];
+
+  useLayoutEffect(() => {
+    const updateSlider = () => {
+      const container = heroSwatchesRef.current;
+      const btn = swatchBtnRefs.current[heroPowertrain];
+      if (!container || !btn) return;
+      setSwatchSliderStyle({
+        transform: `translate3d(${btn.offsetLeft}px, ${btn.offsetTop}px, 0)`,
+        width: `${btn.offsetWidth}px`,
+        height: `${btn.offsetHeight}px`,
+        opacity: 1,
+      });
+    };
+    updateSlider();
+    const ro =
+      typeof ResizeObserver !== 'undefined' && heroSwatchesRef.current
+        ? new ResizeObserver(updateSlider)
+        : null;
+    if (ro && heroSwatchesRef.current) {
+      ro.observe(heroSwatchesRef.current);
+    }
+    return () => {
+      ro?.disconnect();
+    };
+  }, [heroPowertrain, lang, pageView]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLiveFuelFeed().then((feed) => {
+      if (cancelled) return;
+      setFuelFeedLoading(false);
+      if (!feed) return;
+      setFuelFeed(feed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!langMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLangMenuOpen(false);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (
+        langDropdownRef.current &&
+        e.target instanceof Node &&
+        !langDropdownRef.current.contains(e.target)
+      ) {
+        setLangMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [langMenuOpen]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -263,19 +354,8 @@ export default function App() {
 
     let lenis: InstanceType<typeof Lenis> | null = null;
     let lenisTicker: ((time: number) => void) | null = null;
-    if (!prefersReduced) {
-      lenis = new Lenis({
-        duration: 1.05,
-        easing: (v: number) => Math.min(1, 1.001 - Math.pow(2, -10 * v)),
-        smoothWheel: true,
-      });
-      lenis.on('scroll', ScrollTrigger.update);
-      lenisTicker = (time: number) => {
-        lenis?.raf(time * 1000);
-      };
-      gsap.ticker.add(lenisTicker);
-      gsap.ticker.lagSmoothing(0);
-    }
+    let tiltTicker: (() => void) | null = null;
+    const heroStage = heroStageRef.current;
 
     let targetRotX = 0;
     let targetRotY = 0;
@@ -283,12 +363,11 @@ export default function App() {
     let curRotY = 0;
     let velX = 0;
     let velY = 0;
-    let tiltTicker: (() => void) | null = null;
 
-    const heroStage = heroStageRef.current;
     const onHeroMove = (e: PointerEvent) => {
-      if (!heroStage) return;
+      if (!heroStage || e.pointerType !== 'mouse') return;
       const rect = heroStage.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
       const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
       const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
       targetRotY = nx * 10;
@@ -299,134 +378,194 @@ export default function App() {
       targetRotY = 0;
     };
 
-    if (heroStage && tiltWrapRef.current && !prefersReduced) {
-      heroStage.addEventListener('pointermove', onHeroMove);
-      heroStage.addEventListener('pointerleave', onHeroLeave);
-      tiltTicker = () => {
-        const ax = (targetRotX - curRotX) * 0.08;
-        const ay = (targetRotY - curRotY) * 0.08;
-        velX = (velX + ax) * 0.82;
-        velY = (velY + ay) * 0.82;
-        curRotX += velX;
-        curRotY += velY;
-        if (tiltWrapRef.current) {
-          tiltWrapRef.current.style.transform = `rotateX(${curRotX.toFixed(2)}deg) rotateY(${curRotY.toFixed(2)}deg)`;
+    const mm = gsap.matchMedia();
+
+    mm.add(
+      {
+        isDesktop: '(min-width: 769px)',
+        isFinePointer: '(hover: hover) and (pointer: fine)',
+      },
+      (context) => {
+        const { isDesktop, isFinePointer } = context.conditions as {
+          isDesktop: boolean;
+          isFinePointer: boolean;
+        };
+
+        // Ensure mobile has zero lingering inline transforms from hero tilt or GSAP showcase
+        if (!isDesktop || !isFinePointer || prefersReduced) {
+          if (tiltWrapRef.current) tiltWrapRef.current.style.transform = '';
+          if (shadowRef.current) shadowRef.current.style.transform = '';
         }
-        if (shadowRef.current) {
-          shadowRef.current.style.transform = `translateX(${(-curRotY * 1.4).toFixed(1)}px) scale(${1 - Math.abs(curRotX) * 0.01})`;
-        }
-      };
-      gsap.ticker.add(tiltTicker);
-    }
 
-    const gsapCtx = gsap.context(() => {
-      if (prefersReduced) return;
+        if (isDesktop && isFinePointer && !prefersReduced) {
+          lenis = new Lenis({
+            duration: 1.05,
+            easing: (v: number) => Math.min(1, 1.001 - Math.pow(2, -10 * v)),
+            smoothWheel: true,
+          });
+          lenis.on('scroll', ScrollTrigger.update);
+          lenisTicker = (time: number) => {
+            lenis?.raf(time * 1000);
+          };
+          gsap.ticker.add(lenisTicker);
+          gsap.ticker.lagSmoothing(0);
 
-      const frames = frameRefs.current.filter(
-        (el): el is HTMLElement => el !== null
-      );
-      const captions = captionRefs.current.filter(
-        (el): el is HTMLDivElement => el !== null
-      );
-      if (showcaseRef.current && frames.length === 4 && captions.length === 4) {
-        gsap.set(captions, { opacity: 0, x: 52, y: 0 });
-        gsap.set(captions[0], { opacity: 1, x: 0, y: 0 });
-
-        const tl = gsap.timeline({
-          scrollTrigger: {
-            trigger: showcaseRef.current,
-            start: 'top top',
-            end: '+=380%',
-            pin: true,
-            scrub: 1.25,
-            onUpdate: (self: { progress: number }) => {
-              const prog = self.progress * 4.25;
-              let nextIdx = 0;
-              if (prog >= 3.25) nextIdx = 3;
-              else if (prog >= 2.1) nextIdx = 2;
-              else if (prog >= 0.95) nextIdx = 1;
-
-              if (nextIdx !== stageIdxRef.current) {
-                stageIdxRef.current = nextIdx;
-                setActiveStage(nextIdx);
+          if (heroStage && tiltWrapRef.current) {
+            heroStage.addEventListener('pointermove', onHeroMove);
+            heroStage.addEventListener('pointerleave', onHeroLeave);
+            tiltTicker = () => {
+              const ax = (targetRotX - curRotX) * 0.08;
+              const ay = (targetRotY - curRotY) * 0.08;
+              velX = (velX + ax) * 0.82;
+              velY = (velY + ay) * 0.82;
+              curRotX += velX;
+              curRotY += velY;
+              if (tiltWrapRef.current) {
+                tiltWrapRef.current.style.transform = `rotateX(${curRotX.toFixed(2)}deg) rotateY(${curRotY.toFixed(2)}deg)`;
               }
-            },
-          },
-        });
+              if (shadowRef.current) {
+                shadowRef.current.style.transform = `translateX(${(-curRotY * 1.4).toFixed(1)}px) scale(${1 - Math.abs(curRotX) * 0.01})`;
+              }
+            };
+            gsap.ticker.add(tiltTicker);
+          }
+        }
 
-        const wipeStarts = [0.45, 1.65, 2.85];
-        frames.forEach((frame, i) => {
-          if (i === 0) return;
-          tl.fromTo(
-            frame,
-            { clipPath: 'inset(0 0 0 100%)' },
-            { clipPath: 'inset(0 0 0 0%)', ease: 'none', duration: 1.0 },
-            wipeStarts[i - 1]
+        if (isDesktop && !prefersReduced) {
+          const frames = frameRefs.current.filter(
+            (el): el is HTMLElement => el !== null
           );
-        });
-
-        // Slowly cross-fade and glide each left-side text layer horizontally from the side
-        tl.to(
-          captions[0],
-          { opacity: 0, x: -46, y: 0, ease: 'sine.inOut', duration: 0.65 },
-          0.5
-        )
-          .to(
-            captions[1],
-            { opacity: 1, x: 0, y: 0, ease: 'sine.inOut', duration: 0.7 },
-            0.85
-          )
-          .to(
-            captions[1],
-            { opacity: 0, x: -46, y: 0, ease: 'sine.inOut', duration: 0.65 },
-            1.7
-          )
-          .to(
-            captions[2],
-            { opacity: 1, x: 0, y: 0, ease: 'sine.inOut', duration: 0.7 },
-            2.05
-          )
-          .to(
-            captions[2],
-            { opacity: 0, x: -46, y: 0, ease: 'sine.inOut', duration: 0.65 },
-            2.9
-          )
-          .to(
-            captions[3],
-            { opacity: 1, x: 0, y: 0, ease: 'sine.inOut', duration: 0.7 },
-            3.25
+          const captions = captionRefs.current.filter(
+            (el): el is HTMLDivElement => el !== null
           );
+          if (
+            showcaseRef.current &&
+            frames.length === 4 &&
+            captions.length === 4
+          ) {
+            gsap.set(captions, { opacity: 0, x: 52, y: 0 });
+            gsap.set(captions[0], { opacity: 1, x: 0, y: 0 });
 
-        tl.set({}, {}, 4.25);
-      }
+            const tl = gsap.timeline({
+              scrollTrigger: {
+                trigger: showcaseRef.current,
+                start: 'top top',
+                end: '+=380%',
+                pin: true,
+                scrub: 1.25,
+                onUpdate: (self: { progress: number }) => {
+                  const prog = self.progress * 4.25;
+                  let nextIdx = 0;
+                  if (prog >= 3.25) nextIdx = 3;
+                  else if (prog >= 2.1) nextIdx = 2;
+                  else if (prog >= 0.95) nextIdx = 1;
 
-      if (bentoGridRef.current) {
-        gsap.from('.reveal-tile', {
-          y: 28,
-          scale: 0.96,
-          opacity: 0,
-          duration: 0.65,
-          stagger: 0.08,
-          ease: 'power3.out',
-          clearProps: 'transform,opacity',
-          scrollTrigger: {
-            trigger: bentoGridRef.current,
-            start: 'top 82%',
-            once: true,
-          },
-        });
+                  if (nextIdx !== stageIdxRef.current) {
+                    stageIdxRef.current = nextIdx;
+                    setActiveStage(nextIdx);
+                  }
+                },
+              },
+            });
+
+            const wipeStarts = [0.45, 1.65, 2.85];
+            frames.forEach((frame, i) => {
+              if (i === 0) return;
+              tl.fromTo(
+                frame,
+                { clipPath: 'inset(0 0 0 100%)' },
+                { clipPath: 'inset(0 0 0 0%)', ease: 'none', duration: 1.0 },
+                wipeStarts[i - 1]
+              );
+            });
+
+            tl.to(
+              captions[0],
+              { opacity: 0, x: -46, y: 0, ease: 'sine.inOut', duration: 0.65 },
+              0.5
+            )
+              .to(
+                captions[1],
+                { opacity: 1, x: 0, y: 0, ease: 'sine.inOut', duration: 0.7 },
+                0.85
+              )
+              .to(
+                captions[1],
+                {
+                  opacity: 0,
+                  x: -46,
+                  y: 0,
+                  ease: 'sine.inOut',
+                  duration: 0.65,
+                },
+                1.7
+              )
+              .to(
+                captions[2],
+                { opacity: 1, x: 0, y: 0, ease: 'sine.inOut', duration: 0.7 },
+                2.05
+              )
+              .to(
+                captions[2],
+                {
+                  opacity: 0,
+                  x: -46,
+                  y: 0,
+                  ease: 'sine.inOut',
+                  duration: 0.65,
+                },
+                2.9
+              )
+              .to(
+                captions[3],
+                { opacity: 1, x: 0, y: 0, ease: 'sine.inOut', duration: 0.7 },
+                3.25
+              );
+
+            tl.set({}, {}, 4.25);
+          }
+
+          if (bentoGridRef.current) {
+            gsap.from('.reveal-tile', {
+              y: 28,
+              scale: 0.96,
+              opacity: 0,
+              duration: 0.65,
+              stagger: 0.08,
+              ease: 'power3.out',
+              clearProps: 'transform,opacity',
+              scrollTrigger: {
+                trigger: bentoGridRef.current,
+                start: 'top 82%',
+                once: true,
+              },
+            });
+          }
+        }
+
+        return () => {
+          if (tiltTicker) {
+            gsap.ticker.remove(tiltTicker);
+            tiltTicker = null;
+          }
+          if (lenisTicker) {
+            gsap.ticker.remove(lenisTicker);
+            lenisTicker = null;
+          }
+          lenis?.destroy();
+          lenis = null;
+          heroStage?.removeEventListener('pointermove', onHeroMove);
+          heroStage?.removeEventListener('pointerleave', onHeroLeave);
+          if (tiltWrapRef.current) tiltWrapRef.current.style.transform = '';
+          if (shadowRef.current) shadowRef.current.style.transform = '';
+        };
       }
-    });
+    );
 
     return () => {
       cleanupHeroGl();
       cleanupSpecsGl();
-      gsapCtx.revert();
-      if (tiltTicker) gsap.ticker.remove(tiltTicker);
-      if (lenisTicker) gsap.ticker.remove(lenisTicker);
-      lenis?.destroy();
-      heroStage?.removeEventListener('pointermove', onHeroMove);
-      heroStage?.removeEventListener('pointerleave', onHeroLeave);
+      mm.revert();
     };
   }, [pageView]);
 
@@ -485,12 +624,31 @@ export default function App() {
   };
 
   const selectStage = (idx: number) => {
-    stageIdxRef.current = idx;
-    setActiveStage(idx);
+    const wrapped = (idx + SHOWCASE_MEDIA.length) % SHOWCASE_MEDIA.length;
+    stageIdxRef.current = wrapped;
+    setActiveStage(wrapped);
+
+    const isDesktop =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(min-width: 769px)').matches;
+
+    if (!isDesktop) {
+      frameRefs.current.forEach((frame) => {
+        if (frame) frame.style.clipPath = '';
+      });
+      captionRefs.current.forEach((cap) => {
+        if (cap) {
+          cap.style.opacity = '';
+          cap.style.transform = '';
+        }
+      });
+      return;
+    }
+
     frameRefs.current.forEach((frame, i) => {
       if (!frame) return;
       gsap.to(frame, {
-        clipPath: i <= idx ? 'inset(0 0 0 0%)' : 'inset(0 0 0 100%)',
+        clipPath: i <= wrapped ? 'inset(0 0 0 0%)' : 'inset(0 0 0 100%)',
         duration: 0.55,
         ease: 'power2.out',
       });
@@ -498,13 +656,31 @@ export default function App() {
     captionRefs.current.forEach((cap, i) => {
       if (!cap) return;
       gsap.to(cap, {
-        opacity: i === idx ? 1 : 0,
-        x: i === idx ? 0 : i < idx ? -44 : 50,
+        opacity: i === wrapped ? 1 : 0,
+        x: i === wrapped ? 0 : i < wrapped ? -44 : 50,
         y: 0,
         duration: 0.55,
         ease: 'power2.out',
       });
     });
+  };
+
+  const handleShowcaseTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    showcaseTouchRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleShowcaseTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const start = showcaseTouchRef.current;
+    showcaseTouchRef.current = null;
+    const touch = e.changedTouches[0];
+    if (!start || !touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) > 42 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      selectStage(stageIdxRef.current + (dx < 0 ? 1 : -1));
+    }
   };
 
   const updateSplit = (pct: number, animate: boolean) => {
@@ -541,13 +717,45 @@ export default function App() {
     setBrokenImages((prev) => ({ ...prev, [key]: true }));
   };
 
+  const defaultCountryCode = LANG_DEFAULT_COUNTRY[lang];
+  const liveRegionEntry = fuelFeed
+    ? fuelFeed.countries.find((c) => c.countryCode === defaultCountryCode) ??
+      fuelFeed.euAverage
+    : null;
+
+  const syncedAssumptions: GlobalAssumptions = {
+    ...HERO_BASE_ASSUMPTIONS,
+    gasolinePrice: liveRegionEntry
+      ? Number(liveRegionEntry.petrolPrice.toFixed(2))
+      : HERO_BASE_ASSUMPTIONS.gasolinePrice,
+    dieselPrice: liveRegionEntry
+      ? Number(liveRegionEntry.dieselPrice.toFixed(2))
+      : HERO_BASE_ASSUMPTIONS.dieselPrice,
+  };
+  const syncedBlendedElec = getBlendedElectricityPrice(syncedAssumptions);
+
   const heroMeta = POWERTRAIN_META[heroPowertrain];
   const heroText = t.powertrains[heroPowertrain];
   const heroPreset = CAR_PRESETS[heroPowertrain].sedan;
   const heroTco = calculateTco(
     createSlotFromPreset('hero-preview', heroPowertrain, 'sedan'),
-    HERO_ASSUMPTIONS
+    syncedAssumptions
   );
+
+  const sliderGasTco = calculateTco(
+    createSlotFromPreset('slider-gas', 'gasoline', 'sedan'),
+    { ...syncedAssumptions, comparisonMode: 'energy' }
+  );
+  const sliderEvTco = calculateTco(
+    createSlotFromPreset('slider-ev', 'electric', 'sedan'),
+    { ...syncedAssumptions, comparisonMode: 'energy' }
+  );
+  const sliderAnnualDiff = Math.max(
+    0,
+    Math.round((sliderGasTco.annualEnergyCost - sliderEvTco.annualEnergyCost) / 10) *
+      10
+  );
+
   const isDark = theme === 'dark';
   const heroAccent = isDark ? heroMeta.darkColor : heroMeta.color;
 
@@ -671,21 +879,6 @@ export default function App() {
           </nav>
 
           <div className="header-action">
-            <div className="lang-switch" role="group" aria-label="Language">
-              {LANGUAGE_ORDER.map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  className={`lang-btn${lang === code ? ' is-active' : ''}`}
-                  aria-pressed={lang === code}
-                  title={LANGUAGE_LABELS[code].name}
-                  onClick={() => setLang(code)}
-                >
-                  {LANGUAGE_LABELS[code].code}
-                </button>
-              ))}
-            </div>
-
             <a
               href="#compare"
               className="btn btn-primary btn-sm header-cta"
@@ -740,17 +933,75 @@ export default function App() {
                 )}
               </svg>
             </button>
+
+            <div ref={langDropdownRef} className="lang-dropdown">
+              <button
+                type="button"
+                className="lang-trigger"
+                aria-expanded={langMenuOpen}
+                aria-haspopup="menu"
+                aria-label={t.nav.languageLabel}
+                onClick={() => setLangMenuOpen((v) => !v)}
+              >
+                <span>{LANGUAGE_LABELS[lang].code}</span>
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  className={`lang-chevron${langMenuOpen ? ' is-open' : ''}`}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+
+              {langMenuOpen && (
+                <div
+                  className="lang-menu"
+                  role="menu"
+                  aria-label={t.nav.languageLabel}
+                >
+                  {LANGUAGE_ORDER.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={lang === code}
+                      className={`lang-menu-item${
+                        lang === code ? ' is-active' : ''
+                      }`}
+                      onClick={() => {
+                        setLang(code);
+                        setLangMenuOpen(false);
+                      }}
+                    >
+                      <span className="lang-menu-code">
+                        {LANGUAGE_LABELS[code].code}
+                      </span>
+                      <span className="lang-menu-name">
+                        {LANGUAGE_LABELS[code].name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {mobileMenuOpen && (
           <nav className="mobile-nav-drawer" aria-label="Mobile navigation">
             <a
-              href="#showcase"
-              className={`mobile-nav-link${activeNav === 'showcase' ? ' is-active' : ''}`}
-              onClick={(e) => navigateToSection(e, 'showcase')}
+              href="#compare"
+              className={`mobile-nav-link${activeNav === 'compare' ? ' is-active' : ''}`}
+              onClick={(e) => navigateToSection(e, 'compare')}
             >
-              {t.nav.powertrains}
+              {t.nav.compare}
             </a>
             <a
               href="#energy-split"
@@ -767,11 +1018,11 @@ export default function App() {
               {t.nav.costDrivers}
             </a>
             <a
-              href="#compare"
-              className={`mobile-nav-link${activeNav === 'compare' ? ' is-active' : ''}`}
-              onClick={(e) => navigateToSection(e, 'compare')}
+              href="#showcase"
+              className={`mobile-nav-link${activeNav === 'showcase' ? ' is-active' : ''}`}
+              onClick={(e) => navigateToSection(e, 'showcase')}
             >
-              {t.nav.compare}
+              {t.nav.powertrains}
             </a>
             <a
               href="#compare"
@@ -880,7 +1131,12 @@ export default function App() {
                       className="hero-sketch-rate tabular-nums"
                       style={{ color: heroAccent }}
                     >
-                      {heroPreset.consumption} {heroMeta.consumptionUnit}
+                      {heroPowertrain === 'hybrid'
+                        ? t.studio.hybridShortCardNote(
+                            String(heroPreset.hybridWeightedFuel ?? 1.6),
+                            heroPreset.hybridElectricRangeKm ?? 65
+                          )
+                        : `${heroPreset.consumption} ${heroMeta.consumptionUnit}`}
                     </span>
                   </div>
 
@@ -926,10 +1182,16 @@ export default function App() {
               <div className="flask-shadow" ref={shadowRef} aria-hidden="true" />
 
               <div
+                ref={heroSwatchesRef}
                 className="hero-swatches"
                 role="radiogroup"
                 aria-label={t.hero.swatchAriaLabel}
               >
+                <span
+                  className="swatch-slider"
+                  aria-hidden="true"
+                  style={swatchSliderStyle}
+                />
                 {POWERTRAIN_ORDER.map((ptId) => {
                   const meta = POWERTRAIN_META[ptId];
                   const isActive = heroPowertrain === ptId;
@@ -937,6 +1199,9 @@ export default function App() {
                   return (
                     <button
                       key={ptId}
+                      ref={(el) => {
+                        swatchBtnRefs.current[ptId] = el;
+                      }}
                       type="button"
                       role="radio"
                       className={`swatch-btn${isActive ? ' is-active' : ''}`}
@@ -958,9 +1223,14 @@ export default function App() {
           </div>
         </section>
 
-        {/* SECTION 2: Pinned 4-Angle Scrolling Motion Picture Carousel */}
+        {/* SECTION 2: Pinned 4-Angle Scrolling Motion Picture Carousel (swipeable on mobile) */}
         <section id="showcase" ref={showcaseRef} className="showcase-pin">
-          <div className="showcase-viewport" id="showcase-viewport">
+          <div
+            className="showcase-viewport"
+            id="showcase-viewport"
+            onTouchStart={handleShowcaseTouchStart}
+            onTouchEnd={handleShowcaseTouchEnd}
+          >
             <div className="showcase-frames" id="showcase-frames">
               {SHOWCASE_MEDIA.map((stage, i) => (
                 <figure
@@ -968,7 +1238,7 @@ export default function App() {
                   ref={(el: HTMLElement | null) => {
                     frameRefs.current[i] = el;
                   }}
-                  className={`showcase-frame${i === 0 ? ' is-active' : ''}`}
+                  className={`showcase-frame${activeStage === i ? ' is-active' : ''}`}
                   data-index={i}
                 >
                   {brokenImages[stage.id] ? (
@@ -1019,22 +1289,66 @@ export default function App() {
                 })}
               </div>
 
-              <div
-                className="showcase-dots"
-                role="tablist"
-                aria-label={t.showcase.ariaLabel}
-              >
-                {SHOWCASE_MEDIA.map((stage, i) => (
-                  <button
-                    key={stage.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeStage === i}
-                    className={`stage-dot${activeStage === i ? ' is-active' : ''}`}
-                    aria-label={t.showcase.stages[stage.id].title}
-                    onClick={() => selectStage(i)}
-                  />
-                ))}
+              <div className="showcase-controls-bar">
+                <button
+                  type="button"
+                  className="showcase-arrow-btn"
+                  aria-label={t.showcase.prevLabel}
+                  onClick={() => selectStage(activeStage - 1)}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
+
+                <div
+                  className="showcase-dots"
+                  role="tablist"
+                  aria-label={t.showcase.ariaLabel}
+                >
+                  {SHOWCASE_MEDIA.map((stage, i) => (
+                    <button
+                      key={stage.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeStage === i}
+                      className={`stage-dot${activeStage === i ? ' is-active' : ''}`}
+                      aria-label={t.showcase.stages[stage.id].title}
+                      onClick={() => selectStage(i)}
+                    />
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  className="showcase-arrow-btn"
+                  aria-label={t.showcase.nextLabel}
+                  onClick={() => selectStage(activeStage + 1)}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -1065,7 +1379,9 @@ export default function App() {
                   />
                 )}
                 <span className="comp-label comp-label-right tabular-nums">
-                  {t.slider.gasLabel}
+                  {t.slider.gasLabel(
+                    formatEur(sliderGasTco.energyCostPer100Km, 2, t.locale)
+                  )}
                 </span>
               </div>
 
@@ -1091,7 +1407,9 @@ export default function App() {
                   />
                 )}
                 <span className="comp-label comp-label-left tabular-nums">
-                  {t.slider.evLabel}
+                  {t.slider.evLabel(
+                    formatEur(sliderEvTco.energyCostPer100Km, 2, t.locale)
+                  )}
                 </span>
               </div>
 
@@ -1165,7 +1483,9 @@ export default function App() {
 
             <div className="thermal-copy">
               <h2 className="section-title">{t.slider.title}</h2>
-              <p className="section-sub">{t.slider.sub}</p>
+              <p className="section-sub">
+                {t.slider.sub(formatEur(sliderAnnualDiff, 0, t.locale))}
+              </p>
 
               <div
                 className="segmented-control"
@@ -1195,13 +1515,13 @@ export default function App() {
               <div className="thermal-metrics">
                 <div className="metric-item">
                   <span className="metric-value tabular-nums">
-                    {formatEur(5.38, 2, t.locale)}
+                    {formatEur(sliderEvTco.energyCostPer100Km, 2, t.locale)}
                   </span>
                   <span className="metric-label">{t.slider.evMetricLabel}</span>
                 </div>
                 <div className="metric-item">
                   <span className="metric-value tabular-nums">
-                    {formatEur(11.9, 2, t.locale)}
+                    {formatEur(sliderGasTco.energyCostPer100Km, 2, t.locale)}
                   </span>
                   <span className="metric-label">
                     {t.slider.gasMetricLabel}
@@ -1262,7 +1582,12 @@ export default function App() {
                 <div className="bento-footer bento-footer-specs">
                   <div>
                     <h3 className="bento-title">{t.bento.tile3Title}</h3>
-                    <p className="bento-sub">{t.bento.tile3Sub}</p>
+                    <p className="bento-sub">
+                      {t.bento.tile3Sub(
+                        formatEur(syncedAssumptions.gasolinePrice, 2, t.locale),
+                        formatEur(syncedBlendedElec, 2, t.locale)
+                      )}
+                    </p>
                   </div>
                   <span className="spec-meta">{t.bento.tile3Meta}</span>
                 </div>
@@ -1272,7 +1597,12 @@ export default function App() {
         </section>
 
         {/* SECTION 5: Interactive 2-or-3 Car Energy & TCO Comparison Studio */}
-        <ComparisonStudio isDark={isDark} lang={lang} />
+        <ComparisonStudio
+          isDark={isDark}
+          lang={lang}
+          fuelFeed={fuelFeed}
+          fuelFeedLoading={fuelFeedLoading}
+        />
       </main>
       )}
 

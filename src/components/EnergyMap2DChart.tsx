@@ -1,17 +1,30 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ACTIVE_SIM_MARKER_COLOR,
   CarSlotConfig,
   EnergyMap2DAnalysis,
+  GlobalAssumptions,
+  ORIGINAL_MARKER_COLOR,
   POWERTRAIN_META,
   Point2D,
+  SavedScenario,
+  ScenarioRates,
+  applyScenarioToCars,
+  areScenarioRatesEqual,
+  calculateTco,
+  extractScenarioRates,
   formatEur,
+  getBlendedElectricityPrice,
 } from '../data/cars';
 import { Language, TRANSLATIONS } from '../i18n/translations';
 
 interface EnergyMap2DChartProps {
   cars: CarSlotConfig[];
   analysis: EnergyMap2DAnalysis;
+  assumptions: GlobalAssumptions;
   annualKm: number;
+  simulatedRates?: ScenarioRates | null;
+  savedScenarios?: SavedScenario[];
   isDark: boolean;
   lang: Language;
 }
@@ -55,18 +68,22 @@ function findFreeBox(
 
   const offsets = [
     [0, 0],
-    [0, -26],
-    [0, 26],
-    [48, 0],
-    [-48, 0],
-    [48, -26],
-    [-48, -26],
-    [48, 26],
-    [-48, 26],
-    [0, -52],
-    [0, 52],
-    [92, 0],
-    [-92, 0],
+    [0, -18],
+    [0, 18],
+    [28, 0],
+    [-28, 0],
+    [28, -18],
+    [-28, -18],
+    [28, 18],
+    [-28, 18],
+    [0, -34],
+    [0, 34],
+    [54, 0],
+    [-54, 0],
+    [54, -22],
+    [-54, -22],
+    [54, 22],
+    [-54, 22],
   ];
 
   for (const anchor of anchors) {
@@ -80,22 +97,53 @@ function findFreeBox(
   return null;
 }
 
+interface MapScenarioMarker {
+  id: string;
+  kind: 'original' | 'simulated' | 'saved';
+  badgeLabel: string;
+  shortTag: string;
+  legendLabel: string;
+  color: string;
+  fuelX: number;
+  chargeY: number;
+  px: number;
+  py: number;
+  bestPtLabel: string;
+  bestAnnualCost: number;
+}
+
 export function EnergyMap2DChart({
   cars,
   analysis,
+  assumptions,
   annualKm,
+  simulatedRates = null,
+  savedScenarios = [],
   isDark,
   lang,
 }: EnergyMap2DChartProps) {
   const [hoverPt, setHoverPt] = useState<Point2D | null>(null);
+  const [isCompact, setIsCompact] = useState<boolean>(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 768px)').matches
+      : false
+  );
   const t = TRANSLATIONS[lang];
 
-  const width = 760;
-  const height = 340;
-  const padLeft = 68;
-  const padRight = 28;
-  const padTop = 26;
-  const padBottom = 48;
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const sync = () => setIsCompact(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  const width = isCompact ? 420 : 760;
+  const height = isCompact ? 306 : 346;
+  const padLeft = isCompact ? 56 : 68;
+  const padRight = isCompact ? 18 : 28;
+  const padTop = isCompact ? 22 : 26;
+  const padBottom = isCompact ? 48 : 48;
 
   const plotW = width - padLeft - padRight;
   const plotH = height - padTop - padBottom;
@@ -125,6 +173,10 @@ export function EnergyMap2DChart({
 
   const xTicks = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
   const yTicks = [0.1, 0.3, 0.5, 0.7, 0.9];
+
+  const hasGasOrHybrid = cars.some(
+    (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'
+  );
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
@@ -174,46 +226,189 @@ export function EnergyMap2DChart({
   );
   const minInspectCost = Math.min(...inspectCosts);
 
-  const curClampedX = Math.max(xMin, Math.min(xMax, currentFuelX));
-  const curClampedY = Math.max(yMin, Math.min(yMax, currentChargeY));
-  const curPx = xForFuel(curClampedX);
-  const curPy = yForCharge(curClampedY);
+  // Build map markers: Original calculation + Simulated + Saved scenarios
+  const originalColor = isDark
+    ? ORIGINAL_MARKER_COLOR.dark
+    : ORIGINAL_MARKER_COLOR.light;
+  const simColor = isDark
+    ? ACTIVE_SIM_MARKER_COLOR.dark
+    : ACTIVE_SIM_MARKER_COLOR.light;
 
-  // Compute collision-free placements for Now box, Zone labels, and active Breaking-Line tags
-  const placedBoxes: PlacedBox[] = [
-    // Reserve the small bullseye circle itself so no label sits directly over the dot
-    { x: curPx - 12, y: curPy - 12, w: 24, h: 24 },
+  const buildMarker = (
+    id: string,
+    kind: 'original' | 'simulated' | 'saved',
+    badgeLabel: string,
+    shortTag: string,
+    legendLabel: string,
+    color: string,
+    rates: ScenarioRates
+  ): MapScenarioMarker => {
+    const scAssump: GlobalAssumptions = { ...assumptions, ...rates };
+    const scCars = applyScenarioToCars(cars, rates);
+    const fuelX = hasGasOrHybrid ? rates.gasolinePrice : rates.dieselPrice;
+    const chargeY = getBlendedElectricityPrice(scAssump);
+    const px = xForFuel(Math.max(xMin, Math.min(xMax, fuelX)));
+    const py = yForCharge(Math.max(yMin, Math.min(yMax, chargeY)));
+
+    const annualCosts = scCars.map((car) =>
+      calculateTco(car, scAssump).annualEnergyCost
+    );
+    const bestAnnualCost = Math.min(...annualCosts);
+    const bestIdx = Math.max(
+      0,
+      annualCosts.findIndex((c) => c === bestAnnualCost)
+    );
+    const bestPtLabel =
+      t.powertrains[cars[bestIdx]?.powertrain ?? 'electric'].shortLabel;
+
+    return {
+      id,
+      kind,
+      badgeLabel,
+      shortTag,
+      legendLabel,
+      color,
+      fuelX,
+      chargeY,
+      px,
+      py,
+      bestPtLabel,
+      bestAnnualCost,
+    };
+  };
+
+  const origRates = extractScenarioRates(assumptions, cars);
+  const origFuelX = hasGasOrHybrid ? origRates.gasolinePrice : origRates.dieselPrice;
+  const origChargeY = getBlendedElectricityPrice(assumptions);
+  const visibleSaved = savedScenarios.filter((s) => s.visible);
+
+  const mapMarkers: MapScenarioMarker[] = [
+    buildMarker(
+      'original',
+      'original',
+      `${t.charts.pointOrigShort}: €${origFuelX.toFixed(2)} · €${origChargeY.toFixed(2)}`,
+      t.charts.pointOrigShort,
+      t.charts.originalCalculation,
+      originalColor,
+      origRates
+    ),
   ];
 
-  const nowText = `${t.charts.nowLabel}: €${currentFuelX.toFixed(2)} · €${currentChargeY.toFixed(2)}`;
-  const nowW = Math.max(106, nowText.length * 5.9 + 14);
-  const nowH = 19;
-  const nowBox =
-    findFreeBox(
-      [
-        { x: curPx + nowW / 2 + 14, y: curPy - 20 },
-        { x: curPx - nowW / 2 - 14, y: curPy - 20 },
-        { x: curPx + nowW / 2 + 14, y: curPy + 22 },
-        { x: curPx - nowW / 2 - 14, y: curPy + 22 },
-      ],
-      nowW,
-      nowH,
-      bounds,
-      placedBoxes
-    ) ?? {
-      x: Math.min(bounds.right - nowW, curPx + 12),
-      y: Math.max(bounds.top, curPy - 24),
-      w: nowW,
-      h: nowH,
-    };
-  placedBoxes.push(nowBox);
+  const simMatchesVisibleSaved =
+    simulatedRates !== null &&
+    visibleSaved.some((s) =>
+      areScenarioRatesEqual(s.rates, simulatedRates, cars, false)
+    );
+
+  if (
+    simulatedRates !== null &&
+    !areScenarioRatesEqual(simulatedRates, origRates, cars, false) &&
+    !simMatchesVisibleSaved
+  ) {
+    const simFuelX = hasGasOrHybrid
+      ? simulatedRates.gasolinePrice
+      : simulatedRates.dieselPrice;
+    const simChargeY = getBlendedElectricityPrice({
+      ...assumptions,
+      ...simulatedRates,
+    });
+    const badgePrefix = isCompact
+      ? t.charts.simShort
+      : t.charts.simulatedCalculation;
+    mapMarkers.push(
+      buildMarker(
+        'simulated',
+        'simulated',
+        `${badgePrefix}: €${simFuelX.toFixed(2)} · €${simChargeY.toFixed(2)}`,
+        t.charts.simShort,
+        t.charts.simulatedCalculation,
+        simColor,
+        simulatedRates
+      )
+    );
+  }
+
+  for (const s of visibleSaved) {
+    const sFuelX = hasGasOrHybrid
+      ? s.rates.gasolinePrice
+      : s.rates.dieselPrice;
+    const sChargeY = getBlendedElectricityPrice({
+      ...assumptions,
+      ...s.rates,
+    });
+    mapMarkers.push(
+      buildMarker(
+        s.id,
+        'saved',
+        `${s.shortTag}: €${sFuelX.toFixed(2)} · €${sChargeY.toFixed(2)}`,
+        s.shortTag,
+        s.shortTag,
+        isDark ? s.darkColor : s.color,
+        s.rates
+      )
+    );
+  }
+
+  // Reserve all marker dots first so labels never sit on top of any dot
+  const placedBoxes: PlacedBox[] = mapMarkers.map((m) => ({
+    x: m.px - 9,
+    y: m.py - 9,
+    w: 18,
+    h: 18,
+  }));
+
+  // Compute collision-free badge boxes closely anchored to Original, Simulated, and Saved scenario pins
+  const markerLabels = mapMarkers.map((m) => {
+    const fullW = Math.max(
+      isCompact ? 104 : 114,
+      m.badgeLabel.length * (isCompact ? 6.2 : 5.9) + 28
+    );
+    const h = isCompact ? 22 : 21;
+    const anchors = [
+      { x: m.px + fullW / 2 + 10, y: m.py - 16 },
+      { x: m.px - fullW / 2 - 10, y: m.py - 16 },
+      { x: m.px + fullW / 2 + 10, y: m.py + 16 },
+      { x: m.px - fullW / 2 - 10, y: m.py + 16 },
+    ];
+    let text = m.badgeLabel;
+    let box = findFreeBox(anchors, fullW, h, bounds, placedBoxes);
+    if (!box) {
+      const compactW = Math.max(54, m.shortTag.length * 7.2 + 26);
+      text = m.shortTag;
+      box = findFreeBox(
+        [
+          { x: m.px + compactW / 2 + 9, y: m.py - 14 },
+          { x: m.px - compactW / 2 - 9, y: m.py - 14 },
+          { x: m.px + compactW / 2 + 9, y: m.py + 15 },
+          { x: m.px - compactW / 2 - 9, y: m.py + 15 },
+        ],
+        compactW,
+        h,
+        bounds,
+        placedBoxes
+      );
+    }
+    if (!box) {
+      box = {
+        x: Math.max(bounds.left, Math.min(bounds.right - fullW, m.px + 10)),
+        y: Math.max(bounds.top, Math.min(bounds.bottom - h, m.py - 22)),
+        w: fullW,
+        h,
+      };
+    }
+    placedBoxes.push(box);
+    return { marker: m, text, box };
+  });
 
   const zoneLabels = zones.map((zone) => {
     if (zone.areaFraction < 0.06) return null;
     const ptShort = t.powertrains[zone.powertrain].shortLabel;
-    const labelStr = `${t.charts.bestPrefix}: ${ptShort}`;
-    const w = Math.max(92, labelStr.length * 6.0 + 16);
-    const h = 21;
+    const labelStr = t.charts.zoneBadgeLabel(ptShort);
+    const w = Math.max(
+      isCompact ? 104 : 102,
+      labelStr.length * (isCompact ? 6.8 : 6.3) + 28
+    );
+    const h = isCompact ? 24 : 23;
     const cx = xForFuel(zone.centroid.x);
     const cy = yForCharge(zone.centroid.y);
     const box = findFreeBox([{ x: cx, y: cy }], w, h, bounds, placedBoxes);
@@ -230,9 +425,9 @@ export function EnergyMap2DChart({
     const ay2 = yForCharge(bl.activeEnd.y);
     const labelA = t.powertrains[cars[bl.carAIndex].powertrain].shortLabel;
     const labelB = t.powertrains[cars[bl.carBIndex].powertrain].shortLabel;
-    const tagStr = `${labelA.slice(0, 3)} = ${labelB.slice(0, 3)}`;
-    const w = 68;
-    const h = 18;
+    const tagStr = `${labelA.slice(0, 4)} = ${labelB.slice(0, 4)}`;
+    const w = isCompact ? 88 : 84;
+    const h = isCompact ? 21 : 19;
     const anchors = [
       { x: (ax1 + ax2) / 2, y: (ay1 + ay2) / 2 },
       { x: ax1 * 0.72 + ax2 * 0.28, y: ay1 * 0.72 + ay2 * 0.28 },
@@ -284,7 +479,9 @@ export function EnergyMap2DChart({
           const meta = POWERTRAIN_META[zone.powertrain];
           const color = isDark ? meta.darkColor : meta.color;
           const ptsStr = zone.polygon
-            .map((p) => `${xForFuel(p.x).toFixed(1)},${yForCharge(p.y).toFixed(1)}`)
+            .map(
+              (p) => `${xForFuel(p.x).toFixed(1)},${yForCharge(p.y).toFixed(1)}`
+            )
             .join(' ');
 
           return (
@@ -435,7 +632,7 @@ export function EnergyMap2DChart({
           );
         })}
 
-        {/* Non-Overlapping Zone "Best" Cards */}
+        {/* Non-Overlapping Zone Area Cards */}
         {zoneLabels.map((entry) => {
           if (!entry || !entry.box) return null;
           const meta = POWERTRAIN_META[entry.zone.powertrain];
@@ -448,16 +645,24 @@ export function EnergyMap2DChart({
                 y={box.y}
                 width={box.w}
                 height={box.h}
-                rx="5"
-                fill="var(--bg)"
-                fillOpacity="0.92"
+                rx="4"
+                fill="var(--surface-elevated)"
+                fillOpacity="0.94"
                 stroke={color}
-                strokeWidth="1.3"
+                strokeWidth="1.4"
+              />
+              <rect
+                x={box.x + 8}
+                y={box.y + box.h / 2 - 4}
+                width="8"
+                height="8"
+                rx="2"
+                fill={color}
               />
               <text
-                x={box.x + box.w / 2}
-                y={box.y + 13.8}
-                textAnchor="middle"
+                x={box.x + 21}
+                y={box.y + box.h * 0.67}
+                textAnchor="start"
                 className="sensitivity-zone-label"
                 fill={isDark ? '#f4f6f5' : '#111614'}
               >
@@ -478,12 +683,12 @@ export function EnergyMap2DChart({
                 y={box.y}
                 width={box.w}
                 height={box.h}
-                rx="4"
+                rx="3"
                 fill="var(--text-primary)"
               />
               <text
                 x={box.x + box.w / 2}
-                y={box.y + 12}
+                y={box.y + box.h * 0.68}
                 textAnchor="middle"
                 className="sensitivity-break-tag"
                 fill="var(--bg)"
@@ -494,65 +699,119 @@ export function EnergyMap2DChart({
           );
         })}
 
-        {/* Current (Fuel, Charging) Position Marker + Axis Guides (Locked) */}
-        <g pointerEvents="none">
-          <line
-            x1={curPx}
-            y1={curPy}
-            x2={curPx}
-            y2={height - padBottom}
-            stroke="var(--accent)"
-            strokeOpacity="0.55"
-            strokeWidth="1.4"
-            strokeDasharray="3 3"
-          />
-          <line
-            x1={padLeft}
-            y1={curPy}
-            x2={curPx}
-            y2={curPy}
-            stroke="var(--accent)"
-            strokeOpacity="0.55"
-            strokeWidth="1.4"
-            strokeDasharray="3 3"
-          />
-          <circle
-            cx={curPx}
-            cy={curPy}
-            r="9.5"
-            fill="var(--accent)"
-            fillOpacity="0.22"
-          />
-          <circle
-            cx={curPx}
-            cy={curPy}
-            r="6.5"
-            fill="var(--bg)"
-            stroke="var(--accent)"
-            strokeWidth="2.5"
-          />
-          <circle cx={curPx} cy={curPy} r="3" fill="var(--accent)" />
+        {/* Original Calculation + Simulated + Saved Scenario Pins */}
+        {markerLabels.map(({ marker, text, box }) => {
+          const isOriginal = marker.kind === 'original';
+          return (
+            <g key={`map-sc-${marker.id}`} pointerEvents="none">
+              <line
+                x1={marker.px}
+                y1={marker.py}
+                x2={marker.px}
+                y2={height - padBottom}
+                stroke={marker.color}
+                strokeOpacity={isOriginal ? 0.45 : 0.55}
+                strokeWidth="1.3"
+                strokeDasharray="3 3"
+              />
+              <line
+                x1={padLeft}
+                y1={marker.py}
+                x2={marker.px}
+                y2={marker.py}
+                stroke={marker.color}
+                strokeOpacity={isOriginal ? 0.45 : 0.55}
+                strokeWidth="1.3"
+                strokeDasharray="3 3"
+              />
+              <circle
+                cx={marker.px}
+                cy={marker.py}
+                r="10"
+                fill={marker.color}
+                fillOpacity="0.18"
+              />
 
-          <rect
-            x={nowBox.x}
-            y={nowBox.y}
-            width={nowBox.w}
-            height={nowBox.h}
-            rx="4"
-            fill="var(--accent)"
-            stroke="var(--bg)"
-            strokeWidth="1.2"
-          />
-          <text
-            x={nowBox.x + nowBox.w / 2}
-            y={nowBox.y + 12.5}
-            textAnchor="middle"
-            className="sensitivity-break-tag"
-            fill="var(--accent-text)"
-          >
-            {nowText}
-          </text>
-        </g>
+              {isOriginal ? (
+                <>
+                  <circle
+                    cx={marker.px}
+                    cy={marker.py}
+                    r="6.5"
+                    fill="var(--bg)"
+                    stroke={marker.color}
+                    strokeWidth="2.5"
+                  />
+                  <circle cx={marker.px} cy={marker.py} r="2.8" fill={marker.color} />
+                </>
+              ) : (
+                <>
+                  <circle
+                    cx={marker.px}
+                    cy={marker.py}
+                    r="6.5"
+                    fill={marker.color}
+                    stroke="var(--bg)"
+                    strokeWidth="2"
+                  />
+                  <circle cx={marker.px} cy={marker.py} r="2.2" fill="#ffffff" />
+                </>
+              )}
+
+              <rect
+                x={box.x}
+                y={box.y}
+                width={box.w}
+                height={box.h}
+                rx="6"
+                fill={isOriginal ? 'var(--bg)' : marker.color}
+                stroke={marker.color}
+                strokeWidth={isOriginal ? '1.8' : '1.2'}
+              />
+              {isOriginal ? (
+                <g>
+                  <circle
+                    cx={box.x + 11}
+                    cy={box.y + box.h / 2}
+                    r="3.6"
+                    fill="none"
+                    stroke={marker.color}
+                    strokeWidth="1.6"
+                  />
+                  <circle
+                    cx={box.x + 11}
+                    cy={box.y + box.h / 2}
+                    r="1.4"
+                    fill={marker.color}
+                  />
+                </g>
+              ) : marker.kind === 'simulated' ? (
+                <polygon
+                  points={`${box.x + 11},${box.y + box.h / 2 - 4} ${box.x + 15},${box.y + box.h / 2} ${box.x + 11},${box.y + box.h / 2 + 4} ${box.x + 7},${box.y + box.h / 2}`}
+                  fill="#ffffff"
+                />
+              ) : (
+                <rect
+                  x={box.x + 7.5}
+                  y={box.y + box.h / 2 - 3.5}
+                  width="7"
+                  height="7"
+                  rx="1.5"
+                  fill="#ffffff"
+                />
+              )}
+              <text
+                x={box.x + 20}
+                y={box.y + box.h * 0.68}
+                textAnchor="start"
+                className="sensitivity-point-tag"
+                fill={isOriginal ? marker.color : '#ffffff'}
+              >
+                {text}
+              </text>
+            </g>
+          );
+        })}
 
         {/* Interactive Hover Crosshair (Inspection Only) */}
         {hoverPt && (
@@ -587,10 +846,10 @@ export function EnergyMap2DChart({
         )}
       </svg>
 
-      {/* Live Energy Readout Strip at Hovered or Current (Fuel, Charging) Coordinate */}
+      {/* Live Energy Readout Strip at Hovered or Original (Fuel, Charging) Coordinate */}
       <div className="sensitivity-readout-bar">
         <span className="sensitivity-readout-x tabular-nums">
-          {hoverPt ? t.charts.atLabel : t.charts.nowLabel} €
+          {hoverPt ? t.charts.atLabel : t.charts.originalCalculation} €
           {inspectPt.x.toFixed(2)}/L · €{inspectPt.y.toFixed(2)}/kWh:
         </span>
         <div className={`sensitivity-readout-vals cols-${cars.length}`}>

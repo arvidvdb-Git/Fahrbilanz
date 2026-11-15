@@ -89,9 +89,9 @@ export function initSpecsCanvas(canvas: HTMLCanvasElement | null): () => void {
       ? 'rgba(110, 154, 116, 0.82)'
       : 'rgba(61, 87, 64, 0.78)';
 
-    const cx = w * 0.64;
-    const cy = h * 0.43;
-    const scale = Math.min(w, h) * 0.56;
+    const cx = w * 0.5;
+    const cy = h * 0.4;
+    const scale = Math.min(w * 0.42, h * 0.56);
 
     if (!prefersReduced) {
       angle += targetSpeed + hoverBoost;

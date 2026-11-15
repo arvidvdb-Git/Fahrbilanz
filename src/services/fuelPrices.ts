@@ -3,6 +3,8 @@ export interface CountryFuelPrice {
   countryName: string;
   petrolPrice: number;
   dieselPrice: number;
+  isDailyLive?: boolean;
+  lastUpdated?: string;
 }
 
 export interface LiveFuelFeed {
@@ -45,6 +47,40 @@ const TIMEZONE_TO_COUNTRY: Record<string, string> = {
   'Europe/Vilnius': 'LT',
   'Europe/Malta': 'MT',
   'Europe/Nicosia': 'CY',
+  'Europe/London': 'GB',
+  'Atlantic/Reykjavik': 'IS',
+};
+
+const EUROPEAN_COUNTRY_NAMES: Record<string, string> = {
+  AT: 'Austria',
+  BE: 'Belgium',
+  BG: 'Bulgaria',
+  CY: 'Cyprus',
+  CZ: 'Czechia',
+  DE: 'Germany',
+  DK: 'Denmark',
+  EE: 'Estonia',
+  ES: 'Spain',
+  FI: 'Finland',
+  FR: 'France',
+  GB: 'United Kingdom',
+  GR: 'Greece',
+  HR: 'Croatia',
+  HU: 'Hungary',
+  IE: 'Ireland',
+  IS: 'Iceland',
+  IT: 'Italy',
+  LT: 'Lithuania',
+  LU: 'Luxembourg',
+  LV: 'Latvia',
+  MT: 'Malta',
+  NL: 'Netherlands',
+  PL: 'Poland',
+  PT: 'Portugal',
+  RO: 'Romania',
+  SE: 'Sweden',
+  SI: 'Slovenia',
+  SK: 'Slovakia',
 };
 
 function inferCountryFromBrowser(): string {
@@ -104,6 +140,29 @@ async function detectVisitorCountryCode(): Promise<string> {
   return inferCountryFromBrowser();
 }
 
+interface FuelPricesEuFuelEntry {
+  avg?: number;
+}
+
+interface FuelPricesEuCountry {
+  country_code?: string;
+  fuels?: {
+    sp95?: FuelPricesEuFuelEntry;
+    e5?: FuelPricesEuFuelEntry;
+    e10?: FuelPricesEuFuelEntry;
+    diesel?: FuelPricesEuFuelEntry;
+  };
+  last_fetched?: string;
+  last_fetched_iso?: string;
+}
+
+interface FuelPricesEuResponse {
+  ok?: boolean;
+  data?: {
+    countries?: FuelPricesEuCountry[];
+  };
+}
+
 interface EuroOilWatchResponse {
   bulletinDate?: string;
   dataSource?: string;
@@ -119,49 +178,119 @@ interface EuroOilWatchResponse {
   };
 }
 
+function formatIsoDatePart(raw?: string): string | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const match = raw.match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : undefined;
+}
+
 export async function fetchLiveFuelFeed(): Promise<LiveFuelFeed | null> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 5000);
+  const timer = window.setTimeout(() => controller.abort(), 5500);
 
   try {
-    const [pricesRes, detectedCode] = await Promise.all([
+    const [dailyRes, euRes, detectedCode] = await Promise.all([
+      fetch('https://www.fuel-prices.eu/live/api.php', {
+        signal: controller.signal,
+      }).catch(() => null),
       fetch('https://eurooilwatch.com/api/v1/prices', {
         signal: controller.signal,
-      }),
+      }).catch(() => null),
       detectVisitorCountryCode(),
     ]);
 
-    if (!pricesRes.ok) return null;
-    const raw = (await pricesRes.json()) as EuroOilWatchResponse;
+    const countryMap = new Map<string, CountryFuelPrice>();
+    let fallbackDate = '';
+    let euAverageFallback: { petrolPrice?: number; dieselPrice?: number } | undefined;
 
-    const countries: CountryFuelPrice[] = (raw.countries ?? [])
-      .filter(
-        (c): c is Required<CountryFuelPrice> =>
+    if (euRes && euRes.ok) {
+      const euRaw = (await euRes.json()) as EuroOilWatchResponse;
+      fallbackDate = euRaw.bulletinDate || '';
+      euAverageFallback = euRaw.euAverage;
+
+      for (const c of euRaw.countries ?? []) {
+        if (
           typeof c.countryCode === 'string' &&
           typeof c.countryName === 'string' &&
           typeof c.petrolPrice === 'number' &&
           typeof c.dieselPrice === 'number'
-      )
-      .sort((a, b) => a.countryName.localeCompare(b.countryName));
+        ) {
+          countryMap.set(c.countryCode.toUpperCase(), {
+            countryCode: c.countryCode.toUpperCase(),
+            countryName: c.countryName,
+            petrolPrice: c.petrolPrice,
+            dieselPrice: c.dieselPrice,
+            isDailyLive: false,
+            lastUpdated: fallbackDate || undefined,
+          });
+        }
+      }
+    }
 
+    let latestDailyDate = '';
+    let hasDailyUpdates = false;
+
+    if (dailyRes && dailyRes.ok) {
+      const dailyRaw = (await dailyRes.json()) as FuelPricesEuResponse;
+      if (dailyRaw.ok !== false) {
+        for (const c of dailyRaw.data?.countries ?? []) {
+          const code = c.country_code?.toUpperCase();
+          if (!code || !EUROPEAN_COUNTRY_NAMES[code]) continue;
+
+          const petrol =
+            c.fuels?.sp95?.avg ?? c.fuels?.e5?.avg ?? c.fuels?.e10?.avg;
+          const diesel = c.fuels?.diesel?.avg;
+          if (typeof petrol !== 'number' || typeof diesel !== 'number') continue;
+
+          const datePart =
+            formatIsoDatePart(c.last_fetched_iso) ??
+            formatIsoDatePart(c.last_fetched);
+          if (datePart && datePart > latestDailyDate) {
+            latestDailyDate = datePart;
+          }
+          hasDailyUpdates = true;
+
+          const existing = countryMap.get(code);
+          countryMap.set(code, {
+            countryCode: code,
+            countryName: existing?.countryName ?? EUROPEAN_COUNTRY_NAMES[code],
+            petrolPrice: petrol,
+            dieselPrice: diesel,
+            isDailyLive: true,
+            lastUpdated: datePart,
+          });
+        }
+      }
+    }
+
+    const countries = Array.from(countryMap.values()).sort((a, b) =>
+      a.countryName.localeCompare(b.countryName)
+    );
     if (countries.length === 0) return null;
+
+    const euCountries = countries.filter(
+      (c) => c.countryCode !== 'GB' && c.countryCode !== 'IS'
+    );
+    const avgPool = euCountries.length > 0 ? euCountries : countries;
 
     const euAverage = {
       petrolPrice:
-        typeof raw.euAverage?.petrolPrice === 'number'
-          ? raw.euAverage.petrolPrice
-          : countries.reduce((s, c) => s + c.petrolPrice, 0) / countries.length,
+        hasDailyUpdates || typeof euAverageFallback?.petrolPrice !== 'number'
+          ? avgPool.reduce((s, c) => s + c.petrolPrice, 0) / avgPool.length
+          : euAverageFallback.petrolPrice,
       dieselPrice:
-        typeof raw.euAverage?.dieselPrice === 'number'
-          ? raw.euAverage.dieselPrice
-          : countries.reduce((s, c) => s + c.dieselPrice, 0) / countries.length,
+        hasDailyUpdates || typeof euAverageFallback?.dieselPrice !== 'number'
+          ? avgPool.reduce((s, c) => s + c.dieselPrice, 0) / avgPool.length
+          : euAverageFallback.dieselPrice,
     };
 
     const matched = countries.some((c) => c.countryCode === detectedCode);
 
     return {
-      bulletinDate: raw.bulletinDate || '',
-      dataSource: raw.dataSource || 'EC Weekly Oil Bulletin',
+      bulletinDate: latestDailyDate || fallbackDate || '',
+      dataSource: hasDailyUpdates
+        ? 'Fuel-Prices.eu Daily + EC Oil Bulletin'
+        : 'EC Weekly Oil Bulletin',
       countries,
       euAverage,
       detectedCountryCode: matched ? detectedCode : 'EU',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   CarSlotConfig,
   ComparisonMode,
@@ -26,14 +26,27 @@ export function ComparisonChart({
   lang,
 }: ComparisonChartProps) {
   const [hoverYear, setHoverYear] = useState<number | null>(null);
+  const [isCompact, setIsCompact] = useState<boolean>(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 768px)').matches
+      : false
+  );
   const t = TRANSLATIONS[lang];
 
-  const width = 760;
-  const height = 340;
-  const padLeft = 76;
-  const padRight = 56;
-  const padTop = 76;
-  const padBottom = 42;
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const sync = () => setIsCompact(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  const width = isCompact ? 420 : 760;
+  const height = isCompact ? 290 : 340;
+  const padLeft = isCompact ? 56 : 76;
+  const padRight = isCompact ? 22 : 56;
+  const padTop = isCompact ? 68 : 76;
+  const padBottom = isCompact ? 38 : 42;
 
   const plotW = width - padLeft - padRight;
   const plotH = height - padTop - padBottom;
@@ -108,8 +121,8 @@ export function ComparisonChart({
   const activeMinVal = Math.min(...activeVals);
 
   // Build superposed line badges at the active year (never placed below their own line, nudged upward cleanly if close)
-  const badgeH = 26;
-  const minBadgeGap = 30;
+  const badgeH = isCompact ? 26 : 26;
+  const minBadgeGap = isCompact ? 29 : 30;
   const minBadgeCy = badgeH / 2 + 3;
   const maxBadgeCy = padTop + plotH - badgeH / 2 - 1;
 
@@ -121,7 +134,7 @@ export function ComparisonChart({
       const meta = POWERTRAIN_META[car.powertrain];
       const color = isDark ? meta.darkColor : meta.color;
       const label = formatEur(val, 0, t.locale);
-      const badgeW = Math.max(52, label.length * 8.8 + 27);
+      const badgeW = Math.max(58, label.length * (isCompact ? 9.2 : 8.8) + 28);
       const rawY = yForVal(val);
       const badgeX = Math.max(
         padLeft + 4,
@@ -362,22 +375,8 @@ export function ComparisonChart({
         <g pointerEvents="none">
           {lineBadges.map((b) => {
             const boxTop = b.badgeCy - badgeH / 2;
-            const boxBottom = b.badgeCy + badgeH / 2;
-            const needsLeader = Math.abs(b.badgeCy - b.rawY) > 6;
-            const anchorY = b.rawY > boxBottom ? boxBottom : boxTop;
             return (
               <g key={`badge-${b.slotId}`}>
-                {needsLeader && (
-                  <line
-                    x1={activeX}
-                    y1={b.rawY}
-                    x2={b.badgeX + b.badgeW / 2}
-                    y2={anchorY}
-                    stroke={b.color}
-                    strokeWidth="1.6"
-                    strokeOpacity="0.85"
-                  />
-                )}
                 <rect
                   x={b.badgeX}
                   y={boxTop}

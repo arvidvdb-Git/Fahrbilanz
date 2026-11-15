@@ -1,6 +1,10 @@
 export type PowertrainId = 'gasoline' | 'diesel' | 'hybrid' | 'electric';
 export type BodyClassId = 'compact' | 'sedan' | 'suv';
 export type ComparisonMode = 'tco' | 'energy';
+export type HybridTripProfile = 'short' | 'long';
+
+export const CHARGING_LOSS_PCT = 12;
+export const CHARGING_EFFICIENCY = 0.88; // 12% charging loss (eta = 0.88)
 
 export interface PowertrainMeta {
   id: PowertrainId;
@@ -17,6 +21,10 @@ export interface PowertrainMeta {
 export interface CarPreset {
   purchasePrice: number;
   consumption: number; // L/100km or kWh/100km (driving consumption before charge losses)
+  hybridWeightedFuel?: number; // F_w (L/100 km)
+  hybridDepletedFuel?: number; // F_cs (L/100 km)
+  hybridElectricRangeKm?: number; // R EAER (km)
+  hybridBatteryKwh?: number; // B net (kWh)
   annualService: number; // EUR/yr
   annualTax: number; // EUR/yr
   annualInsurance: number; // EUR/yr
@@ -32,6 +40,11 @@ export interface CarSlotConfig {
   subsidyEnabled: boolean;
   subsidyAmount: number;
   consumption: number;
+  hybridWeightedFuel: number; // F_w: weighted combined fuel consumption (L/100 km)
+  hybridDepletedFuel: number; // F_cs: fuel consumption with discharged battery (L/100 km)
+  hybridElectricRangeKm: number; // R: electric range, combined EAER (km)
+  hybridBatteryKwh: number; // B: net battery capacity (kWh)
+  hybridTripProfile: HybridTripProfile; // 'short' => s = UF, 'long' => s = 0.70 * UF
   annualService: number;
   annualTax: number;
   annualInsurance: number;
@@ -50,15 +63,30 @@ export interface GlobalAssumptions {
   homeAcShare: number; // % 0..100
   publicAcShare: number; // % 0..100
   publicDcShare: number; // % 0..100
-  chargeLossPct: number; // % e.g. 10
-  monthlyChargingFee: number; // EUR/mo fixed subscription/grid fee
-  wallboxCost: number; // one-time wallbox hardware & install EUR
+  monthlyChargingFee: number; // EUR/mo rent wallbox fee
+  wallboxCost: number; // one-time buy wallbox hardware & install EUR
+  rentWallboxElectric: boolean; // apply monthly rent wallbox fee to full electric
+  rentWallboxHybrid: boolean; // apply monthly rent wallbox fee to plug-in hybrid
+  buyWallboxElectric: boolean; // apply one-time buy wallbox cost to full electric
+  buyWallboxHybrid: boolean; // apply one-time buy wallbox cost to plug-in hybrid
+}
+
+export interface HybridEnergyStats {
+  uf: number; // Brochure utility factor = 1 - F_w / F_cs
+  electricShareS: number; // Real electric share s (UF or 0.70 * UF)
+  eNetPer100Km: number; // 100 * B / R (kWh/100 km at battery)
+  eWallPer100Km: number; // e_net / 0.88 (kWh/100 km at wall when electric)
+  fuelPer100Km: number; // (1 - s) * F_cs (L/100 km)
+  elecWallPer100Km: number; // s * e_wall (kWh/100 km at wall)
 }
 
 export interface TcoResult {
   energyCostPer100Km: number; // all-in energy cost per 100 km (incl. charge losses & monthly fee)
-  variableEnergyPer100Km: number; // variable fuel or billed kWh cost per 100 km
-  billedConsumptionPer100Km: number; // includes charge loss for electric
+  variableEnergyPer100Km: number; // variable fuel + billed kWh cost per 100 km
+  billedConsumptionPer100Km: number; // includes charge loss for electric (or fuel L/100km for hybrid/ICE)
+  hybridStats: HybridEnergyStats | null;
+  totalFuelCost: number;
+  totalElectricityCost: number;
   annualEnergyCost: number; // variable energy + annual fixed charging fee
   totalVariableEnergyCost: number;
   totalFixedChargingFee: number;
@@ -88,7 +116,7 @@ export const POWERTRAIN_META: Record<PowertrainId, PowertrainMeta> = {
     shortLabel: 'Gasoline',
     tagline: 'Lowest upfront purchase price, familiar refueling',
     energyUnit: 'L',
-    consumptionUnit: 'L / 100 km',
+    consumptionUnit: 'L/100 km',
     color: '#C26D27',
     darkColor: '#E5954F',
     co2PerUnitKg: 2.37,
@@ -99,7 +127,7 @@ export const POWERTRAIN_META: Record<PowertrainId, PowertrainMeta> = {
     shortLabel: 'Diesel',
     tagline: 'High highway efficiency for long annual distances',
     energyUnit: 'L',
-    consumptionUnit: 'L / 100 km',
+    consumptionUnit: 'L/100 km',
     color: '#3B668C',
     darkColor: '#6EA0CC',
     co2PerUnitKg: 2.65,
@@ -108,9 +136,9 @@ export const POWERTRAIN_META: Record<PowertrainId, PowertrainMeta> = {
     id: 'hybrid',
     label: 'Hybrid',
     shortLabel: 'Hybrid',
-    tagline: 'Regenerative city savings paired with unlimited range',
+    tagline: 'Plug-in electric daily commutes paired with unlimited range',
     energyUnit: 'L',
-    consumptionUnit: 'L / 100 km',
+    consumptionUnit: 'L/100 km',
     color: '#1F7A70',
     darkColor: '#4AB5A8',
     co2PerUnitKg: 2.37,
@@ -121,7 +149,7 @@ export const POWERTRAIN_META: Record<PowertrainId, PowertrainMeta> = {
     shortLabel: 'Electric',
     tagline: 'Lowest energy cost per km and minimal brake wear',
     energyUnit: 'kWh',
-    consumptionUnit: 'kWh / 100 km',
+    consumptionUnit: 'kWh/100 km',
     color: '#3D6E43',
     darkColor: '#68B372',
     co2PerUnitKg: 0.36,
@@ -208,27 +236,39 @@ export const CAR_PRESETS: Record<
   },
   hybrid: {
     compact: {
-      purchasePrice: 32500,
-      consumption: 4.3,
-      annualService: 620,
+      purchasePrice: 35900,
+      consumption: 1.4,
+      hybridWeightedFuel: 1.4,
+      hybridDepletedFuel: 5.6,
+      hybridElectricRangeKm: 62,
+      hybridBatteryKwh: 11.5,
+      annualService: 640,
       annualTax: 140,
       annualInsurance: 1000,
       defaultSubsidy: 1500,
       resalePct5Yr: 52,
     },
     sedan: {
-      purchasePrice: 40500,
-      consumption: 4.7,
-      annualService: 710,
+      purchasePrice: 42900,
+      consumption: 1.6,
+      hybridWeightedFuel: 1.6,
+      hybridDepletedFuel: 6.2,
+      hybridElectricRangeKm: 65,
+      hybridBatteryKwh: 13.0,
+      annualService: 720,
       annualTax: 180,
       annualInsurance: 1140,
       defaultSubsidy: 1500,
       resalePct5Yr: 51,
     },
     suv: {
-      purchasePrice: 45200,
-      consumption: 5.5,
-      annualService: 780,
+      purchasePrice: 47900,
+      consumption: 1.9,
+      hybridWeightedFuel: 1.9,
+      hybridDepletedFuel: 7.2,
+      hybridElectricRangeKm: 68,
+      hybridBatteryKwh: 15.6,
+      annualService: 790,
       annualTax: 220,
       annualInsurance: 1230,
       defaultSubsidy: 1500,
@@ -272,6 +312,7 @@ export function createSlotFromPreset(
   bodyClass: BodyClassId = 'sedan'
 ): CarSlotConfig {
   const preset = CAR_PRESETS[powertrain][bodyClass];
+  const hybridFallback = CAR_PRESETS.hybrid[bodyClass];
   return {
     slotId,
     powertrain,
@@ -280,10 +321,52 @@ export function createSlotFromPreset(
     subsidyEnabled: false,
     subsidyAmount: preset.defaultSubsidy,
     consumption: preset.consumption,
+    hybridWeightedFuel:
+      preset.hybridWeightedFuel ?? hybridFallback.hybridWeightedFuel ?? 1.6,
+    hybridDepletedFuel:
+      preset.hybridDepletedFuel ?? hybridFallback.hybridDepletedFuel ?? 6.2,
+    hybridElectricRangeKm:
+      preset.hybridElectricRangeKm ?? hybridFallback.hybridElectricRangeKm ?? 65,
+    hybridBatteryKwh:
+      preset.hybridBatteryKwh ?? hybridFallback.hybridBatteryKwh ?? 13.0,
+    hybridTripProfile: 'short',
     annualService: preset.annualService,
     annualTax: preset.annualTax,
     annualInsurance: preset.annualInsurance,
     resalePct: preset.resalePct5Yr,
+  };
+}
+
+export function computeHybridEnergyStats(
+  car: Pick<
+    CarSlotConfig,
+    | 'hybridWeightedFuel'
+    | 'hybridDepletedFuel'
+    | 'hybridElectricRangeKm'
+    | 'hybridBatteryKwh'
+    | 'hybridTripProfile'
+  >
+): HybridEnergyStats {
+  const fW = Math.max(0, car.hybridWeightedFuel);
+  const fCs = Math.max(0.1, car.hybridDepletedFuel);
+  const rKm = Math.max(1, car.hybridElectricRangeKm);
+  const bKwh = Math.max(0, car.hybridBatteryKwh);
+
+  const uf = Math.max(0, Math.min(1, 1 - fW / fCs));
+  const electricShareS = car.hybridTripProfile === 'long' ? 0.7 * uf : uf;
+  const eNetPer100Km = (100 * bKwh) / rKm;
+  const eWallPer100Km = eNetPer100Km / CHARGING_EFFICIENCY;
+
+  const fuelPer100Km = (1 - electricShareS) * fCs;
+  const elecWallPer100Km = electricShareS * eWallPer100Km;
+
+  return {
+    uf,
+    electricShareS,
+    eNetPer100Km,
+    eWallPer100Km,
+    fuelPer100Km,
+    elecWallPer100Km,
   };
 }
 
@@ -324,18 +407,54 @@ export function calculateTco(
   assumptions: GlobalAssumptions
 ): TcoResult {
   const isElectric = car.powertrain === 'electric';
-  const unitPrice = getUnitPrice(car.powertrain, assumptions);
-  const lossMultiplier = isElectric ? 1 + assumptions.chargeLossPct / 100 : 1;
-  const billedConsumptionPer100Km = car.consumption * lossMultiplier;
+  const isHybrid = car.powertrain === 'hybrid';
+  const blendedElecPrice = getBlendedElectricityPrice(assumptions);
 
-  const variableEnergyPer100Km = billedConsumptionPer100Km * unitPrice;
-  const annualVariableEnergy =
-    (assumptions.annualKm / 100) * variableEnergyPer100Km;
-  const annualFixedChargingFee = isElectric
+  const hybridStats = isHybrid ? computeHybridEnergyStats(car) : null;
+
+  let billedConsumptionPer100Km = 0;
+  let annualFuelLitres = 0;
+  let annualElecKwh = 0;
+  let variableEnergyPer100Km = 0;
+  let annualFuelCost = 0;
+  let annualElectricityCost = 0;
+
+  if (isHybrid && hybridStats) {
+    billedConsumptionPer100Km = hybridStats.fuelPer100Km;
+    annualFuelLitres = (assumptions.annualKm / 100) * hybridStats.fuelPer100Km;
+    annualElecKwh = (assumptions.annualKm / 100) * hybridStats.elecWallPer100Km;
+    annualFuelCost = annualFuelLitres * assumptions.gasolinePrice;
+    annualElectricityCost = annualElecKwh * blendedElecPrice;
+    variableEnergyPer100Km =
+      hybridStats.fuelPer100Km * assumptions.gasolinePrice +
+      hybridStats.elecWallPer100Km * blendedElecPrice;
+  } else if (isElectric) {
+    billedConsumptionPer100Km = car.consumption / CHARGING_EFFICIENCY;
+    annualElecKwh = (assumptions.annualKm / 100) * billedConsumptionPer100Km;
+    annualElectricityCost = annualElecKwh * blendedElecPrice;
+    variableEnergyPer100Km = billedConsumptionPer100Km * blendedElecPrice;
+  } else {
+    const fuelPrice =
+      car.powertrain === 'diesel'
+        ? assumptions.dieselPrice
+        : assumptions.gasolinePrice;
+    billedConsumptionPer100Km = car.consumption;
+    annualFuelLitres = (assumptions.annualKm / 100) * car.consumption;
+    annualFuelCost = annualFuelLitres * fuelPrice;
+    variableEnergyPer100Km = car.consumption * fuelPrice;
+  }
+
+  const annualVariableEnergy = annualFuelCost + annualElectricityCost;
+  const appliesRentWallbox =
+    (isElectric && assumptions.rentWallboxElectric) ||
+    (isHybrid && assumptions.rentWallboxHybrid);
+  const annualFixedChargingFee = appliesRentWallbox
     ? assumptions.monthlyChargingFee * 12
     : 0;
   const annualEnergyCost = annualVariableEnergy + annualFixedChargingFee;
 
+  const totalFuelCost = annualFuelCost * assumptions.years;
+  const totalElectricityCost = annualElectricityCost * assumptions.years;
   const totalVariableEnergyCost = annualVariableEnergy * assumptions.years;
   const totalFixedChargingFee = annualFixedChargingFee * assumptions.years;
   const totalEnergyCost = annualEnergyCost * assumptions.years;
@@ -345,8 +464,7 @@ export function calculateTco(
       ? (annualEnergyCost / assumptions.annualKm) * 100
       : variableEnergyPer100Km;
 
-  const supportsSubsidy =
-    car.powertrain === 'hybrid' || car.powertrain === 'electric';
+  const supportsSubsidy = isHybrid || isElectric;
   const effectiveSubsidy =
     supportsSubsidy && car.subsidyEnabled
       ? Math.min(car.purchasePrice, Math.max(0, car.subsidyAmount))
@@ -357,7 +475,12 @@ export function calculateTco(
   const resaleValue = car.purchasePrice * (effectiveResalePct / 100);
   const netDepreciation = Math.max(0, netPurchasePrice - resaleValue);
 
-  const wallboxCost = isElectric ? Math.max(0, assumptions.wallboxCost) : 0;
+  const appliesBuyWallbox =
+    (isElectric && assumptions.buyWallboxElectric) ||
+    (isHybrid && assumptions.buyWallboxHybrid);
+  const wallboxCost = appliesBuyWallbox
+    ? Math.max(0, assumptions.wallboxCost)
+    : 0;
   const totalServiceCost = car.annualService * assumptions.years;
   const totalTaxCost = car.annualTax * assumptions.years;
   const totalInsuranceCost = car.annualInsurance * assumptions.years;
@@ -379,9 +502,12 @@ export function calculateTco(
   const activeMonthly = activeTotal / (assumptions.years * 12);
   const activePerKm = totalKm > 0 ? activeTotal / totalKm : 0;
 
-  const meta = POWERTRAIN_META[car.powertrain];
-  const annualUnits = (assumptions.annualKm / 100) * billedConsumptionPer100Km;
-  const annualCo2Kg = annualUnits * meta.co2PerUnitKg;
+  const annualCo2Kg = isHybrid
+    ? annualFuelLitres * POWERTRAIN_META.gasoline.co2PerUnitKg +
+      annualElecKwh * POWERTRAIN_META.electric.co2PerUnitKg
+    : isElectric
+      ? annualElecKwh * POWERTRAIN_META.electric.co2PerUnitKg
+      : annualFuelLitres * POWERTRAIN_META[car.powertrain].co2PerUnitKg;
 
   const cumulativeByYear: number[] = [];
   const cumulativeNetByYear: number[] = [];
@@ -410,6 +536,9 @@ export function calculateTco(
     energyCostPer100Km,
     variableEnergyPer100Km,
     billedConsumptionPer100Km,
+    hybridStats,
+    totalFuelCost,
+    totalElectricityCost,
     annualEnergyCost,
     totalVariableEnergyCost,
     totalFixedChargingFee,
@@ -446,7 +575,7 @@ export function formatEur(
   }).format(value);
 }
 
-export type SensitivityMode = 'fuel' | 'homeAc' | 'publicDc' | 'blendedElec';
+export type SensitivityMode = 'fuel' | 'blendedElec';
 
 export interface SensitivityLine {
   slotId: string;
@@ -499,8 +628,8 @@ export function computeSensitivity(
   assumptions: GlobalAssumptions,
   mode: SensitivityMode
 ): SensitivityAnalysis {
-  const xMin = mode === 'fuel' ? 0.5 : mode === 'publicDc' ? 0.2 : 0.1;
-  const xMax = mode === 'fuel' ? 3.0 : mode === 'publicDc' ? 1.2 : 0.9;
+  const xMin = mode === 'fuel' ? 0.5 : 0.1;
+  const xMax = mode === 'fuel' ? 3.0 : 0.9;
 
   const hasGasOrHybrid = cars.some(
     (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'
@@ -509,33 +638,19 @@ export function computeSensitivity(
   const dieselTracksSpread = mode === 'fuel' && hasGasOrHybrid && hasDiesel;
   const dieselSpread = assumptions.dieselPrice - assumptions.gasolinePrice;
 
-  let currentX = assumptions.gasolinePrice;
-  if (mode === 'fuel') {
-    currentX = hasGasOrHybrid
-      ? assumptions.gasolinePrice
-      : assumptions.dieselPrice;
-  } else if (mode === 'homeAc') {
-    currentX = assumptions.homeAcPrice;
-  } else if (mode === 'publicDc') {
-    currentX = assumptions.publicDcPrice;
-  } else {
-    currentX = getBlendedElectricityPrice(assumptions);
-  }
+  const currentX =
+    mode === 'fuel'
+      ? hasGasOrHybrid
+        ? assumptions.gasolinePrice
+        : assumptions.dieselPrice
+      : getBlendedElectricityPrice(assumptions);
 
   const unitLabel = mode === 'fuel' ? '€/L' : '€/kWh';
-  const shareSum = Math.max(
-    1,
-    assumptions.homeAcShare +
-      assumptions.publicAcShare +
-      assumptions.publicDcShare
-  );
-  const wHome = assumptions.homeAcShare / shareSum;
-  const wPubAc = assumptions.publicAcShare / shareSum;
-  const wPubDc = assumptions.publicDcShare / shareSum;
   const blendedKwh = getBlendedElectricityPrice(assumptions);
 
   const lines: SensitivityLine[] = cars.map((car, idx) => {
     const isElectric = car.powertrain === 'electric';
+    const isHybrid = car.powertrain === 'hybrid';
     const res = calculateTco(car, assumptions);
 
     const ownershipFixed =
@@ -548,60 +663,48 @@ export function computeSensitivity(
           res.totalInsuranceCost;
 
     const fixedCharging = res.totalFixedChargingFee;
-    const totalUnits =
-      (assumptions.annualKm / 100) *
-      res.billedConsumptionPer100Km *
-      assumptions.years;
+    const totalFuelUnits = isElectric
+      ? 0
+      : isHybrid && res.hybridStats
+        ? (assumptions.annualKm / 100) *
+          res.hybridStats.fuelPer100Km *
+          assumptions.years
+        : (assumptions.annualKm / 100) * car.consumption * assumptions.years;
+
+    const totalElecUnits = isElectric
+      ? (assumptions.annualKm / 100) *
+        res.billedConsumptionPer100Km *
+        assumptions.years
+      : isHybrid && res.hybridStats
+        ? (assumptions.annualKm / 100) *
+          res.hybridStats.elecWallPer100Km *
+          assumptions.years
+        : 0;
+
+    const fuelFixedPrice =
+      car.powertrain === 'diesel'
+        ? assumptions.dieselPrice
+        : assumptions.gasolinePrice;
+    const fuelFixedCost = totalFuelUnits * fuelFixedPrice;
 
     let slope = 0;
     let intercept = ownershipFixed;
 
     if (mode === 'fuel') {
-      if (isElectric) {
-        slope = 0;
-        intercept = ownershipFixed + fixedCharging + totalUnits * blendedKwh;
-      } else if (car.powertrain === 'diesel' && hasGasOrHybrid) {
-        slope = totalUnits;
-        intercept = ownershipFixed + totalUnits * dieselSpread;
-      } else {
-        slope = totalUnits;
-        intercept = ownershipFixed;
-      }
-    } else if (mode === 'homeAc') {
-      if (isElectric) {
-        slope = totalUnits * wHome;
-        intercept =
-          ownershipFixed +
-          fixedCharging +
-          totalUnits *
-            (wPubAc * assumptions.publicAcPrice +
-              wPubDc * assumptions.publicDcPrice);
-      } else {
-        slope = 0;
-        intercept = ownershipFixed + res.totalEnergyCost;
-      }
-    } else if (mode === 'publicDc') {
-      if (isElectric) {
-        slope = totalUnits * wPubDc;
-        intercept =
-          ownershipFixed +
-          fixedCharging +
-          totalUnits *
-            (wHome * assumptions.homeAcPrice +
-              wPubAc * assumptions.publicAcPrice);
-      } else {
-        slope = 0;
-        intercept = ownershipFixed + res.totalEnergyCost;
-      }
+      slope = totalFuelUnits;
+      const spreadAdd =
+        car.powertrain === 'diesel' && hasGasOrHybrid
+          ? totalFuelUnits * dieselSpread
+          : 0;
+      intercept =
+        ownershipFixed +
+        fixedCharging +
+        spreadAdd +
+        totalElecUnits * blendedKwh;
     } else {
-      // blendedElec
-      if (isElectric) {
-        slope = totalUnits;
-        intercept = ownershipFixed + fixedCharging;
-      } else {
-        slope = 0;
-        intercept = ownershipFixed + res.totalEnergyCost;
-      }
+      // blendedElec: sweeping electricity price (€/kWh)
+      slope = totalElecUnits;
+      intercept = ownershipFixed + fixedCharging + fuelFixedCost;
     }
 
     return {
@@ -905,27 +1008,37 @@ export function computeEnergyMap2D(
 
   // Annual Energy Cost(x, y) = a * x + b * y + c
   const planes = cars.map((car) => {
-    const isElectric = car.powertrain === 'electric';
-    const lossMult = isElectric ? 1 + assumptions.chargeLossPct / 100 : 1;
-    const annualUnits =
-      (assumptions.annualKm / 100) * car.consumption * lossMult;
-
-    if (isElectric) {
+    if (car.powertrain === 'electric') {
+      const annualElec =
+        (assumptions.annualKm / 100) * (car.consumption / CHARGING_EFFICIENCY);
       return {
         a: 0,
-        b: annualUnits,
-        c: assumptions.monthlyChargingFee * 12,
+        b: annualElec,
+        c: assumptions.rentWallboxElectric
+          ? assumptions.monthlyChargingFee * 12
+          : 0,
       };
     }
+    if (car.powertrain === 'hybrid') {
+      const h = computeHybridEnergyStats(car);
+      return {
+        a: (assumptions.annualKm / 100) * h.fuelPer100Km,
+        b: (assumptions.annualKm / 100) * h.elecWallPer100Km,
+        c: assumptions.rentWallboxHybrid
+          ? assumptions.monthlyChargingFee * 12
+          : 0,
+      };
+    }
+    const annualFuel = (assumptions.annualKm / 100) * car.consumption;
     if (car.powertrain === 'diesel' && hasGasOrHybrid) {
       return {
-        a: annualUnits,
+        a: annualFuel,
         b: 0,
-        c: annualUnits * dieselSpread,
+        c: annualFuel * dieselSpread,
       };
     }
     return {
-      a: annualUnits,
+      a: annualFuel,
       b: 0,
       c: 0,
     };
@@ -1052,4 +1165,160 @@ export function computeEnergyMap2D(
     breakingLines,
   };
 }
+
+export interface ScenarioCarTcoOverride {
+  purchasePrice: number;
+  resalePct: number;
+}
+
+export interface ScenarioRates {
+  gasolinePrice: number;
+  dieselPrice: number;
+  homeAcPrice: number;
+  publicAcPrice: number;
+  publicDcPrice: number;
+  homeAcShare: number;
+  publicAcShare: number;
+  publicDcShare: number;
+  hybridTripProfile?: HybridTripProfile;
+  tcoBySlot?: Record<string, ScenarioCarTcoOverride>;
+}
+
+export interface SavedScenario {
+  id: string;
+  shortTag: string;
+  color: string;
+  darkColor: string;
+  visible: boolean;
+  rates: ScenarioRates;
+}
+
+export const ORIGINAL_MARKER_COLOR = {
+  light: '#111614',
+  dark: '#EFF3F1',
+};
+
+export const ACTIVE_SIM_MARKER_COLOR = {
+  light: '#7C3AED',
+  dark: '#A78BFA',
+};
+
+export const SCENARIO_COLOR_PALETTE: Array<{ light: string; dark: string }> = [
+  { light: '#C026D3', dark: '#E879F9' },
+  { light: '#E11D48', dark: '#FB7185' },
+  { light: '#4338CA', dark: '#818CF8' },
+  { light: '#9D174D', dark: '#F472B6' },
+  { light: '#6D28D9', dark: '#DDD6FE' },
+];
+
+export function buildBaseTcoOverrides(
+  cars: CarSlotConfig[]
+): Record<string, ScenarioCarTcoOverride> {
+  const map: Record<string, ScenarioCarTcoOverride> = {};
+  for (const c of cars) {
+    map[c.slotId] = {
+      purchasePrice: c.purchasePrice,
+      resalePct: c.resalePct,
+    };
+  }
+  return map;
+}
+
+export function extractScenarioRates(
+  source: Pick<
+    GlobalAssumptions,
+    | 'gasolinePrice'
+    | 'dieselPrice'
+    | 'homeAcPrice'
+    | 'publicAcPrice'
+    | 'publicDcPrice'
+    | 'homeAcShare'
+    | 'publicAcShare'
+    | 'publicDcShare'
+  >,
+  cars?: CarSlotConfig[]
+): ScenarioRates {
+  const firstHybrid = cars?.find((c) => c.powertrain === 'hybrid');
+  return {
+    gasolinePrice: source.gasolinePrice,
+    dieselPrice: source.dieselPrice,
+    homeAcPrice: source.homeAcPrice,
+    publicAcPrice: source.publicAcPrice,
+    publicDcPrice: source.publicDcPrice,
+    homeAcShare: source.homeAcShare,
+    publicAcShare: source.publicAcShare,
+    publicDcShare: source.publicDcShare,
+    hybridTripProfile: firstHybrid?.hybridTripProfile ?? 'short',
+    tcoBySlot: cars ? buildBaseTcoOverrides(cars) : undefined,
+  };
+}
+
+export function applyScenarioToCars(
+  cars: CarSlotConfig[],
+  rates?: ScenarioRates | null
+): CarSlotConfig[] {
+  if (!rates) return cars;
+  return cars.map((car) => {
+    const ov = rates.tcoBySlot?.[car.slotId];
+    const nextTrip =
+      car.powertrain === 'hybrid' && rates.hybridTripProfile
+        ? rates.hybridTripProfile
+        : car.hybridTripProfile;
+    return {
+      ...car,
+      hybridTripProfile: nextTrip,
+      purchasePrice: ov ? ov.purchasePrice : car.purchasePrice,
+      resalePct: ov ? ov.resalePct : car.resalePct,
+    };
+  });
+}
+
+export function areScenarioRatesEqual(
+  a: ScenarioRates,
+  b: ScenarioRates,
+  cars?: CarSlotConfig[],
+  includeTco = true
+): boolean {
+  const baseSame =
+    Math.abs(a.gasolinePrice - b.gasolinePrice) <= 0.001 &&
+    Math.abs(a.dieselPrice - b.dieselPrice) <= 0.001 &&
+    Math.abs(a.homeAcPrice - b.homeAcPrice) <= 0.001 &&
+    Math.abs(a.publicAcPrice - b.publicAcPrice) <= 0.001 &&
+    Math.abs(a.publicDcPrice - b.publicDcPrice) <= 0.001 &&
+    a.homeAcShare === b.homeAcShare &&
+    a.publicAcShare === b.publicAcShare &&
+    a.publicDcShare === b.publicDcShare;
+  if (!baseSame) return false;
+
+  const hasHybrid = cars ? cars.some((c) => c.powertrain === 'hybrid') : true;
+  if (hasHybrid) {
+    const tripA = a.hybridTripProfile ?? 'short';
+    const tripB = b.hybridTripProfile ?? 'short';
+    if (tripA !== tripB) return false;
+  }
+
+  if (includeTco) {
+    const slotIds = cars
+      ? cars.map((c) => c.slotId)
+      : Array.from(
+          new Set([
+            ...Object.keys(a.tcoBySlot ?? {}),
+            ...Object.keys(b.tcoBySlot ?? {}),
+          ])
+        );
+    for (const sid of slotIds) {
+      const ca = a.tcoBySlot?.[sid];
+      const cb = b.tcoBySlot?.[sid];
+      const fallback = cars?.find((c) => c.slotId === sid);
+      const pa = ca?.purchasePrice ?? fallback?.purchasePrice ?? 0;
+      const pb = cb?.purchasePrice ?? fallback?.purchasePrice ?? 0;
+      const ra = ca?.resalePct ?? fallback?.resalePct ?? 0;
+      const rb = cb?.resalePct ?? fallback?.resalePct ?? 0;
+      if (Math.abs(pa - pb) > 0.5 || Math.abs(ra - rb) > 0.1) return false;
+    }
+  }
+
+  return true;
+}
+
 
