@@ -207,7 +207,7 @@ export function ComparisonChart({
 
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="tco-chart-svg sensitivity-svg"
+        className="tco-chart-svg cumul-chart-svg"
         role="img"
         aria-label={
           comparisonMode === 'energy'

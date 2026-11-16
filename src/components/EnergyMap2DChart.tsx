@@ -440,6 +440,13 @@ export function EnergyMap2DChart({
 
   return (
     <div>
+      <div className="chart-header sensitivity-chart-header">
+        <div>
+          <h3 className="chart-title">{t.studio.mapTitle2D}</h3>
+          <p className="chart-sub">{t.charts.sensSub2D}</p>
+        </div>
+      </div>
+
       <div className="chart-legend sensitivity-legend" aria-label="Map legend">
         {cars.map((car, idx) => {
           const meta = POWERTRAIN_META[car.powertrain];

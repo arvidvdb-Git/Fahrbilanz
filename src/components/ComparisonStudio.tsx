@@ -2095,16 +2095,34 @@ export function ComparisonStudio({
                           {t.studio.hybridTripLong}
                         </button>
                       </div>
-                      <p className="hybrid-share-note tabular-nums">
-                        {t.studio.hybridShareSummary(
-                          String(
-                            Math.round(editRes.hybridStats.electricShareS * 100)
-                          ),
-                          String(Math.round(editRes.hybridStats.uf * 100)),
-                          editRes.hybridStats.fuelPer100Km.toFixed(1),
-                          editRes.hybridStats.elecWallPer100Km.toFixed(1)
-                        )}
-                      </p>
+                      <div className="hybrid-share-summary">
+                        <p className="hybrid-share-subnote">
+                          {t.studio.hybridOfficialNote(
+                            String(Math.round(editRes.hybridStats.uf * 100)),
+                            editCar.hybridTripProfile === 'long'
+                          )}
+                        </p>
+                        <dl className="hybrid-share-grid tabular-nums">
+                          <div className="hybrid-share-row">
+                            <dt>{t.studio.hybridShareElectricLabel}</dt>
+                            <dd>
+                              {Math.round(editRes.hybridStats.electricShareS * 100)}%
+                            </dd>
+                          </div>
+                          <div className="hybrid-share-row">
+                            <dt>{t.studio.hybridFuelUsedLabel}</dt>
+                            <dd>
+                              {editRes.hybridStats.fuelPer100Km.toFixed(1)} L/100 km
+                            </dd>
+                          </div>
+                          <div className="hybrid-share-row">
+                            <dt>{t.studio.hybridElecChargedLabel}</dt>
+                            <dd>
+                              {editRes.hybridStats.elecWallPer100Km.toFixed(1)} kWh/100 km
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
                     </div>
                   )}
 
@@ -2847,14 +2865,32 @@ export function ComparisonStudio({
                         {t.studio.hybridTripLong}
                       </button>
                     </div>
-                    <p className="hybrid-share-note tabular-nums">
-                      {t.studio.hybridShareSummary(
-                        String(Math.round(res.hybridStats.electricShareS * 100)),
-                        String(Math.round(res.hybridStats.uf * 100)),
-                        res.hybridStats.fuelPer100Km.toFixed(1),
-                        res.hybridStats.elecWallPer100Km.toFixed(1)
-                      )}
-                    </p>
+                    <div className="hybrid-share-summary">
+                      <p className="hybrid-share-subnote">
+                        {t.studio.hybridOfficialNote(
+                          String(Math.round(res.hybridStats.uf * 100)),
+                          car.hybridTripProfile === 'long'
+                        )}
+                      </p>
+                      <dl className="hybrid-share-grid tabular-nums">
+                        <div className="hybrid-share-row">
+                          <dt>{t.studio.hybridShareElectricLabel}</dt>
+                          <dd>
+                            {Math.round(res.hybridStats.electricShareS * 100)}%
+                          </dd>
+                        </div>
+                        <div className="hybrid-share-row">
+                          <dt>{t.studio.hybridFuelUsedLabel}</dt>
+                          <dd>{res.hybridStats.fuelPer100Km.toFixed(1)} L/100 km</dd>
+                        </div>
+                        <div className="hybrid-share-row">
+                          <dt>{t.studio.hybridElecChargedLabel}</dt>
+                          <dd>
+                            {res.hybridStats.elecWallPer100Km.toFixed(1)} kWh/100 km
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
                   </div>
                 )}
 
@@ -3240,36 +3276,39 @@ export function ComparisonStudio({
                   </button>
                 </div>
 
-                {sensitivityView === '1d' && (
-                  <div
-                    className="horizon-tabs sensitivity-mode-tabs"
-                    role="tablist"
-                    aria-label="Sensitivity variable"
+                <div
+                  className={`horizon-tabs sensitivity-mode-tabs${
+                    sensitivityView === '2d' ? ' is-disabled' : ''
+                  }`}
+                  role="tablist"
+                  aria-label="Sensitivity variable"
+                  aria-disabled={sensitivityView === '2d'}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    disabled={sensitivityView === '2d'}
+                    aria-selected={sensitivityMode === 'fuel'}
+                    className={`horizon-btn${
+                      sensitivityMode === 'fuel' ? ' is-active' : ''
+                    }`}
+                    onClick={() => setSensitivityMode('fuel')}
                   >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={sensitivityMode === 'fuel'}
-                      className={`horizon-btn${
-                        sensitivityMode === 'fuel' ? ' is-active' : ''
-                      }`}
-                      onClick={() => setSensitivityMode('fuel')}
-                    >
-                      {t.charts.tabFuel}
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={sensitivityMode === 'blendedElec'}
-                      className={`horizon-btn${
-                        sensitivityMode === 'blendedElec' ? ' is-active' : ''
-                      }`}
-                      onClick={() => setSensitivityMode('blendedElec')}
-                    >
-                      {t.charts.tabElectricityPrice}
-                    </button>
-                  </div>
-                )}
+                    {t.charts.tabFuel}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    disabled={sensitivityView === '2d'}
+                    aria-selected={sensitivityMode === 'blendedElec'}
+                    className={`horizon-btn${
+                      sensitivityMode === 'blendedElec' ? ' is-active' : ''
+                    }`}
+                    onClick={() => setSensitivityMode('blendedElec')}
+                  >
+                    {t.charts.tabElectricityPrice}
+                  </button>
+                </div>
               </div>
 
               {compareCount === 3 && (
@@ -3366,11 +3405,11 @@ export function ComparisonStudio({
                     </div>
                   </div>
 
-                  {energyMap2D.breakingLines.length > 0 && (
-                    <div className="sensitivity-subcol">
-                      <span className="sensitivity-subcol-title">
-                        {t.studio.breakEvenHead}
-                      </span>
+                  <div className="sensitivity-subcol">
+                    <span className="sensitivity-subcol-title">
+                      {t.studio.breakEvenHead}
+                    </span>
+                    {energyMap2D.breakingLines.length > 0 ? (
                       <div className="threshold-list">
                         {energyMap2D.breakingLines.map((bl, idx) => {
                           const ptA =
@@ -3403,8 +3442,12 @@ export function ComparisonStudio({
                           );
                         })}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <p className="threshold-empty">
+                        {t.studio.noBreakEvenInRange}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -3452,74 +3495,84 @@ export function ComparisonStudio({
                     </div>
                   </div>
 
-                  {(sensitivity.switches.length > 0 ||
-                    sensitivity.pairwise.filter((p) => p.x > 0).length > 0) && (
-                    <div className="sensitivity-subcol">
-                      <span className="sensitivity-subcol-title">
-                        {t.studio.breakEvenHead}
-                      </span>
-                      {sensitivity.switches.length > 0 && (
-                        <div className="threshold-list">
-                          {sensitivity.switches.map((sw, sIdx) => {
-                            const fromLabel =
-                              t.powertrains[
-                                sensitivityCars[sw.fromCarIndex].powertrain
-                              ].shortLabel;
-                            const toLabel =
-                              t.powertrains[
-                                sensitivityCars[sw.toCarIndex].powertrain
-                              ].shortLabel;
-                            const unit =
-                              sensitivityMode === 'fuel' ? '/L' : '/kWh';
-                            return (
-                              <div key={sIdx} className="threshold-row">
-                                <span className="threshold-pair">
-                                  {t.studio.breakPrefix}: {fromLabel} → {toLabel}
-                                </span>
-                                <span className="threshold-val tabular-nums">
-                                  €{sw.x.toFixed(2)}
-                                  {unit}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {sensitivity.pairwise.filter((p) => p.x > 0).length >
-                        0 && (
-                        <div className="threshold-sublist">
-                          {sensitivity.pairwise
-                            .filter((p) => p.x > 0)
-                            .map((p, idx) => {
-                              const belowLabel =
+                  <div className="sensitivity-subcol">
+                    <span className="sensitivity-subcol-title">
+                      {t.studio.breakEvenHead}
+                    </span>
+                    {sensitivity.switches.length > 0 ||
+                    sensitivity.pairwise.filter((p) => p.x > 0).length > 0 ? (
+                      <>
+                        {sensitivity.switches.length > 0 && (
+                          <div className="threshold-list">
+                            {sensitivity.switches.map((sw, sIdx) => {
+                              const fromLabel =
                                 t.powertrains[
-                                  sensitivityCars[p.cheaperBelowIndex]
-                                    .powertrain
+                                  sensitivityCars[sw.fromCarIndex].powertrain
                                 ].shortLabel;
-                              const aboveLabel =
+                              const toLabel =
                                 t.powertrains[
-                                  sensitivityCars[p.cheaperAboveIndex]
-                                    .powertrain
+                                  sensitivityCars[sw.toCarIndex].powertrain
                                 ].shortLabel;
                               const unit =
                                 sensitivityMode === 'fuel' ? '/L' : '/kWh';
                               return (
-                                <div key={idx} className="threshold-subrow">
-                                  <span>
-                                    {t.studio.beatsAbove(aboveLabel, belowLabel)}
+                                <div key={sIdx} className="threshold-row">
+                                  <span className="threshold-pair">
+                                    {t.studio.breakPrefix}: {fromLabel} →{' '}
+                                    {toLabel}
                                   </span>
-                                  <span className="tabular-nums">
-                                    €{p.x.toFixed(2)}
+                                  <span className="threshold-val tabular-nums">
+                                    €{sw.x.toFixed(2)}
                                     {unit}
                                   </span>
                                 </div>
                               );
                             })}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                          </div>
+                        )}
+
+                        {sensitivity.pairwise.filter((p) => p.x > 0).length >
+                          0 && (
+                          <div className="threshold-sublist">
+                            {sensitivity.pairwise
+                              .filter((p) => p.x > 0)
+                              .map((p, idx) => {
+                                const belowLabel =
+                                  t.powertrains[
+                                    sensitivityCars[p.cheaperBelowIndex]
+                                      .powertrain
+                                  ].shortLabel;
+                                const aboveLabel =
+                                  t.powertrains[
+                                    sensitivityCars[p.cheaperAboveIndex]
+                                      .powertrain
+                                  ].shortLabel;
+                                const unit =
+                                  sensitivityMode === 'fuel' ? '/L' : '/kWh';
+                                return (
+                                  <div key={idx} className="threshold-subrow">
+                                    <span>
+                                      {t.studio.beatsAbove(
+                                        aboveLabel,
+                                        belowLabel
+                                      )}
+                                    </span>
+                                    <span className="tabular-nums">
+                                      €{p.x.toFixed(2)}
+                                      {unit}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p className="threshold-empty">
+                        {t.studio.noBreakEvenInRange}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

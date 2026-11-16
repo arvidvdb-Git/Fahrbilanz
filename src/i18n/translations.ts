@@ -212,19 +212,13 @@ export interface Translations {
     hybridFcsName: string;
     hybridRangeName: string;
     hybridBatteryName: string;
-    hybridFwLabel: string;
-    hybridFcsLabel: string;
-    hybridRangeLabel: string;
-    hybridBatteryLabel: string;
     hybridTripLabel: string;
     hybridTripShort: string;
     hybridTripLong: string;
-    hybridShareSummary: (
-      sPct: string,
-      ufPct: string,
-      fuelStr: string,
-      elecStr: string
-    ) => string;
+    hybridShareElectricLabel: string;
+    hybridOfficialNote: (ufPct: string, isLong: boolean) => string;
+    hybridFuelUsedLabel: string;
+    hybridElecChargedLabel: string;
     hybridShortCardNote: (fwStr: string, rangeKm: number) => string;
     purchasePriceLabel: string;
     serviceYrLabel: string;
@@ -278,6 +272,7 @@ export interface Translations {
     breakEvenHead: string;
     currentWord: string;
     breakPrefix: string;
+    noBreakEvenInRange: string;
     beatsAbove: (abovePt: string, belowPt: string) => string;
     view1DEnergy: string;
     view1DTco: string;
@@ -323,6 +318,7 @@ export interface Translations {
     sensSubFuelSpread: string;
     sensSubFuel: string;
     sensSubElectricityPrice: string;
+    sensSub2D: string;
     tabFuel: string;
     tabElectricityPrice: string;
     breakingLineLegend: string;
@@ -666,19 +662,20 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       annualEnergyLabel: 'Annual Energy',
       energySpendLabel: 'Energy Spend',
       combinedConsumptionName: 'Combined consumption',
-      hybridFwName: 'Weighted fuel F_w',
-      hybridFcsName: 'Discharged fuel F_cs',
-      hybridRangeName: 'Electric range R',
-      hybridBatteryName: 'Net battery B',
-      hybridFwLabel: 'Weighted fuel F_w (L/100 km)',
-      hybridFcsLabel: 'Discharged fuel F_cs (L/100 km)',
-      hybridRangeLabel: 'Electric range R (km)',
-      hybridBatteryLabel: 'Net battery B (kWh)',
+      hybridFwName: 'Weighted combined consumption',
+      hybridFcsName: 'Discharged combined fuel consumption',
+      hybridRangeName: 'Net electric range',
+      hybridBatteryName: 'Net battery',
       hybridTripLabel: 'Hybrid trip distance profile',
       hybridTripShort: 'Mainly short distances',
       hybridTripLong: 'Mainly long distances',
-      hybridShareSummary: (sPct, ufPct, fuelStr, elecStr) =>
-        `Real electric share s = ${sPct}% (brochure UF ${ufPct}%) → ${fuelStr} L fuel + ${elecStr} kWh/100 km billed.`,
+      hybridShareElectricLabel: 'Real electric share',
+      hybridOfficialNote: (ufPct, isLong) =>
+        isLong
+          ? `Long trips reduce the official share (${ufPct}%) by 30%`
+          : `Matches the official test share (${ufPct}%)`,
+      hybridFuelUsedLabel: 'Fuel consumption',
+      hybridElecChargedLabel: 'Electricity billed',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km EV`,
       purchasePriceLabel: 'Purchase Price (€)',
@@ -731,6 +728,7 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       breakEvenHead: 'Break-Even Thresholds',
       currentWord: 'Current',
       breakPrefix: 'Break',
+      noBreakEvenInRange: 'No break-even switch within plotted range',
       beatsAbove: (above, below) => `${above} beats ${below} above`,
       view1DEnergy: '1D Energy Sweep',
       view1DTco: '1D TCO Sweep',
@@ -781,6 +779,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         'Colored zones show which car wins at each fuel price (€/L); hover plot to inspect',
       sensSubElectricityPrice:
         'Sweeping electricity price (€/kWh) across your full charging mix',
+      sensSub2D:
+        'Pure energy cost map: fuel (€/L) vs. blended electricity (€/kWh); hover plot to inspect',
       tabFuel: 'Fuel (€/L)',
       tabElectricityPrice: 'Electricity price (€/kWh)',
       breakingLineLegend: 'Breaking line (winner switches)',
@@ -1119,19 +1119,20 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       annualEnergyLabel: 'Energie / Jahr',
       energySpendLabel: 'Energiekosten',
       combinedConsumptionName: 'Kombinierter Verbrauch',
-      hybridFwName: 'Gewichteter Verbrauch F_w',
-      hybridFcsName: 'Entladene Batterie F_cs',
-      hybridRangeName: 'E-Reichweite EAER R',
-      hybridBatteryName: 'Netto-Batterie B',
-      hybridFwLabel: 'Gewichteter Verbrauch F_w (L/100 km)',
-      hybridFcsLabel: 'Entladene Batterie F_cs (L/100 km)',
-      hybridRangeLabel: 'E-Reichweite EAER R (km)',
-      hybridBatteryLabel: 'Netto-Batterie B (kWh)',
+      hybridFwName: 'Gewichteter kombinierter Verbrauch',
+      hybridFcsName: 'Kombinierter Verbrauch (leere Batterie)',
+      hybridRangeName: 'Elektrische Netto-Reichweite',
+      hybridBatteryName: 'Netto-Batterie',
       hybridTripLabel: 'Fahrprofil Hybrid-Strecken',
       hybridTripShort: 'Überwiegend kurze Strecken',
       hybridTripLong: 'Überwiegend lange Strecken',
-      hybridShareSummary: (sPct, ufPct, fuelStr, elecStr) =>
-        `Realer E-Anteil s = ${sPct} % (Prospekt UF ${ufPct} %) → ${fuelStr} L Benzin + ${elecStr} kWh/100 km ab Steckdose.`,
+      hybridShareElectricLabel: 'Realer Elektroanteil',
+      hybridOfficialNote: (ufPct, isLong) =>
+        isLong
+          ? `Langstrecken senken den offiziellen Anteil (${ufPct} %) um 30 %`
+          : `Entspricht dem offiziellen Prüfanteil (${ufPct} %)`,
+      hybridFuelUsedLabel: 'Kraftstoffverbrauch',
+      hybridElecChargedLabel: 'Abgerechneter Strom',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km E-R.`,
       purchasePriceLabel: 'Kaufpreis (€)',
@@ -1184,6 +1185,7 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       breakEvenHead: 'Gewinnschwellen',
       currentWord: 'Aktuell',
       breakPrefix: 'Wechsel',
+      noBreakEvenInRange: 'Kein Siegerwechsel im dargestellten Bereich',
       beatsAbove: (above, below) => `${above} schlägt ${below} ab`,
       view1DEnergy: '1D Energie-Kurve',
       view1DTco: '1D TCO-Kurve',
@@ -1234,6 +1236,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         'Farbige Zonen zeigen den Sieger je Kraftstoffpreis (€/L); zum Prüfen darüberfahren',
       sensSubElectricityPrice:
         'Variation des Strompreises (€/kWh) über Ihren Lademix',
+      sensSub2D:
+        'Reine Energiekosten-Karte: Kraftstoff (€/L) vs. Strompreis (€/kWh); zum Prüfen darüberfahren',
       tabFuel: 'Sprit (€/L)',
       tabElectricityPrice: 'Strompreis (€/kWh)',
       breakingLineLegend: 'Grenzlinie (Siegerwechsel)',
@@ -1572,19 +1576,20 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       annualEnergyLabel: 'Energie / jr',
       energySpendLabel: 'Energiekosten',
       combinedConsumptionName: 'Gecombineerd verbruik',
-      hybridFwName: 'Gewogen brandstof F_w',
-      hybridFcsName: 'Lege accu verbruik F_cs',
-      hybridRangeName: 'Elektrisch bereik EAER R',
-      hybridBatteryName: 'Netto batterij B',
-      hybridFwLabel: 'Gewogen brandstof F_w (L/100 km)',
-      hybridFcsLabel: 'Lege accu verbruik F_cs (L/100 km)',
-      hybridRangeLabel: 'Elektrisch bereik EAER R (km)',
-      hybridBatteryLabel: 'Netto batterij B (kWh)',
+      hybridFwName: 'Gewogen gecombineerd verbruik',
+      hybridFcsName: 'Gecombineerd brandstofverbruik (lege accu)',
+      hybridRangeName: 'Elektrisch netto bereik',
+      hybridBatteryName: 'Netto batterij',
       hybridTripLabel: 'Ritprofiel hybride',
       hybridTripShort: 'Vooral korte afstanden',
       hybridTripLong: 'Vooral lange afstanden',
-      hybridShareSummary: (sPct, ufPct, fuelStr, elecStr) =>
-        `Echt elektrisch aandeel s = ${sPct}% (folder UF ${ufPct}%) → ${fuelStr} L brandstof + ${elecStr} kWh/100 km geladen.`,
+      hybridShareElectricLabel: 'Werkelijk elektrisch aandeel',
+      hybridOfficialNote: (ufPct, isLong) =>
+        isLong
+          ? `Lange ritten verlagen het officiële aandeel (${ufPct}%) met 30%`
+          : `Gelijk aan het officiële testaandeel (${ufPct}%)`,
+      hybridFuelUsedLabel: 'Brandstofverbruik',
+      hybridElecChargedLabel: 'Geladen elektriciteit',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km EV`,
       purchasePriceLabel: 'Aankoopprijs (€)',
@@ -1637,6 +1642,7 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       breakEvenHead: 'Omslagpunten',
       currentWord: 'Huidig',
       breakPrefix: 'Omslag',
+      noBreakEvenInRange: 'Geen omslagpunt binnen weergegeven bereik',
       beatsAbove: (above, below) => `${above} verslaat ${below} boven`,
       view1DEnergy: '1D Energie-curve',
       view1DTco: '1D TCO-curve',
@@ -1687,6 +1693,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         'Kleurzones tonen de winnaar per brandstofprijs (€/L); beweeg erover om te inspecteren',
       sensSubElectricityPrice:
         'Variatie van de stroomprijs (€/kWh) over uw volledige laadmix',
+      sensSub2D:
+        'Puur energiekosten-overzicht: brandstof (€/L) vs. stroomprijs (€/kWh); beweeg erover om te inspecteren',
       tabFuel: 'Brandstof (€/L)',
       tabElectricityPrice: 'Stroomprijs (€/kWh)',
       breakingLineLegend: 'Grenslijn (winnaar wisselt)',
@@ -2025,19 +2033,20 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       annualEnergyLabel: 'Énergie / an',
       energySpendLabel: 'Dépense Énergie',
       combinedConsumptionName: 'Conso. mixte',
-      hybridFwName: 'Carburant pondéré F_w',
-      hybridFcsName: 'Batterie déchargée F_cs',
-      hybridRangeName: 'Autonomie élec. R',
-      hybridBatteryName: 'Batterie nette B',
-      hybridFwLabel: 'Carburant pondéré F_w (L/100 km)',
-      hybridFcsLabel: 'Batterie déchargée F_cs (L/100 km)',
-      hybridRangeLabel: 'Autonomie élec. R (km)',
-      hybridBatteryLabel: 'Batterie nette B (kWh)',
+      hybridFwName: 'Conso. mixte pondérée',
+      hybridFcsName: 'Conso. carburant batterie déchargée',
+      hybridRangeName: 'Autonomie électrique nette',
+      hybridBatteryName: 'Batterie nette',
       hybridTripLabel: 'Profil de trajets hybride',
       hybridTripShort: 'Surtout courts trajets',
       hybridTripLong: 'Surtout longs trajets',
-      hybridShareSummary: (sPct, ufPct, fuelStr, elecStr) =>
-        `Part électrique réelle s = ${sPct} % (UF ${ufPct} %) → ${fuelStr} L carburant + ${elecStr} kWh/100 km facturés.`,
+      hybridShareElectricLabel: 'Part électrique réelle',
+      hybridOfficialNote: (ufPct, isLong) =>
+        isLong
+          ? `Longs trajets : part officielle (${ufPct} %) réduite de 30 %`
+          : `Identique à la part officielle d’essai (${ufPct} %)`,
+      hybridFuelUsedLabel: 'Consommation carburant',
+      hybridElecChargedLabel: 'Électricité facturée',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km EV`,
       purchasePriceLabel: 'Prix d’achat (€)',
@@ -2090,6 +2099,7 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       breakEvenHead: 'Seuils de Bascule',
       currentWord: 'Actuel',
       breakPrefix: 'Seuil',
+      noBreakEvenInRange: 'Aucun seuil dans la plage affichée',
       beatsAbove: (above, below) => `${above} bat ${below} dès`,
       view1DEnergy: 'Courbe Énergie 1D',
       view1DTco: 'Courbe TCO 1D',
@@ -2140,6 +2150,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         'Zones colorées par gagnant selon le carburant (€/L) ; survolez pour inspecter',
       sensSubElectricityPrice:
         'Variation du prix de l’électricité (€/kWh) sur l’ensemble de votre mix',
+      sensSub2D:
+        'Carte d’énergie pure : carburant (€/L) vs. électricité (€/kWh) ; survolez pour inspecter',
       tabFuel: 'Carburant (€/L)',
       tabElectricityPrice: 'Prix électricité (€/kWh)',
       breakingLineLegend: 'Ligne de rupture (changement)',

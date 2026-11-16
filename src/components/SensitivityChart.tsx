@@ -127,7 +127,7 @@ export function SensitivityChart({
   }, []);
 
   const width = isCompact ? 420 : 760;
-  const height = isCompact ? 306 : 336;
+  const height = isCompact ? 306 : 346;
   const padLeft = isCompact ? 54 : 64;
   const padRight = isCompact ? 18 : 26;
   const padTop = isCompact ? 76 : 72;
@@ -420,7 +420,7 @@ export function SensitivityChart({
 
   const content = (
     <>
-      <div className="chart-header">
+      <div className="chart-header sensitivity-chart-header">
         <div>
           <h3 className="chart-title">
             {comparisonMode === 'energy'
