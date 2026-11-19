@@ -55,8 +55,15 @@ export function ComparisonChart({
     1000,
     ...results.flatMap((r) => r.cumulativeNetByYear)
   );
-  const step = maxVal <= 12000 ? 2000 : 5000;
-  const yMax = Math.ceil(maxVal / step) * step;
+  const step =
+    maxVal <= 1500
+      ? 500
+      : maxVal <= 5000
+        ? 1000
+        : maxVal <= 15000
+          ? 2000
+          : 5000;
+  const yMax = Math.max(step, Math.ceil(maxVal / step) * step);
   const yTicks = [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
 
   const xForYear = (y: number) => padLeft + (y / years) * plotW;

@@ -189,14 +189,45 @@ export async function fetchLiveFuelFeed(): Promise<LiveFuelFeed | null> {
   const timer = window.setTimeout(() => controller.abort(), 5500);
 
   try {
-    const [dailyRes, euRes, detectedCode] = await Promise.all([
+    const [serverRes, detectedCode] = await Promise.all([
+      fetch('/api/v1/fuel-prices', { signal: controller.signal }).catch(
+        () => null
+      ),
+      detectVisitorCountryCode(),
+    ]);
+
+    if (serverRes && serverRes.ok) {
+      const serverData = (await serverRes.json()) as {
+        bulletinDate?: string;
+        dataSource?: string;
+        countries?: CountryFuelPrice[];
+        euAverage?: { petrolPrice: number; dieselPrice: number };
+      };
+      if (
+        Array.isArray(serverData.countries) &&
+        serverData.countries.length > 0 &&
+        serverData.euAverage
+      ) {
+        const matched = serverData.countries.some(
+          (c) => c.countryCode === detectedCode
+        );
+        return {
+          bulletinDate: serverData.bulletinDate || '',
+          dataSource: serverData.dataSource || 'EC Weekly Oil Bulletin',
+          countries: serverData.countries,
+          euAverage: serverData.euAverage,
+          detectedCountryCode: matched ? detectedCode : 'EU',
+        };
+      }
+    }
+
+    const [dailyRes, euRes] = await Promise.all([
       fetch('https://www.fuel-prices.eu/live/api.php', {
         signal: controller.signal,
       }).catch(() => null),
       fetch('https://eurooilwatch.com/api/v1/prices', {
         signal: controller.signal,
       }).catch(() => null),
-      detectVisitorCountryCode(),
     ]);
 
     const countryMap = new Map<string, CountryFuelPrice>();

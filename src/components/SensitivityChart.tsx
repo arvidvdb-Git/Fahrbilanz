@@ -142,8 +142,17 @@ export function SensitivityChart({
     bottom: height - padBottom - 6,
   };
 
-  const { xMin, xMax, currentX, lines, regimes, switches, mode, unitLabel } =
-    analysis;
+  const {
+    xMin,
+    xMax,
+    xTicks,
+    currentX,
+    lines,
+    regimes,
+    switches,
+    mode,
+    unitLabel,
+  } = analysis;
 
   const hasGasOrHybrid = cars.some(
     (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'
@@ -269,25 +278,23 @@ export function SensitivityChart({
   ];
   const rawMin = Math.min(...ySamples);
   const rawMax = Math.max(...ySamples);
-  const step = rawMax <= 14000 ? 2000 : 5000;
-  const yMin = Math.max(0, Math.floor((rawMin * 0.9) / step) * step);
+  const ySpan = Math.max(200, rawMax - rawMin);
+  const yPad = Math.max(80, ySpan * 0.16);
+  const paddedMin = Math.max(0, rawMin - yPad);
+  const paddedMax = rawMax + yPad;
+  const ySteps = [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000];
+  const step =
+    ySteps.find((st) => (paddedMax - paddedMin) / st <= 5.5) ?? 10000;
+  const yMin = Math.max(0, Math.floor(paddedMin / step) * step);
   const yMax = Math.max(
     yMin + step * 2,
-    Math.ceil((rawMax * 1.06) / step) * step
+    Math.ceil(paddedMax / step) * step
   );
 
-  const yTicks = [
-    yMin,
-    yMin + (yMax - yMin) * 0.25,
-    yMin + (yMax - yMin) * 0.5,
-    yMin + (yMax - yMin) * 0.75,
-    yMax,
-  ];
-
-  const xTicks =
-    mode === 'fuel'
-      ? [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
-      : [0.1, 0.25, 0.4, 0.55, 0.7, 0.85];
+  const yTicks: number[] = [];
+  for (let v = yMin; v <= yMax + 1e-6; v += step) {
+    yTicks.push(Math.round(v));
+  }
 
   const xForVal = (x: number) =>
     padLeft + ((x - xMin) / (xMax - xMin)) * plotW;
@@ -550,7 +557,9 @@ export function SensitivityChart({
                 className="chart-axis-text"
               >
                 {tick >= 1000
-                  ? `€${(tick / 1000).toFixed(tick % 1000 === 0 ? 0 : 1)}k`
+                  ? `€${(tick / 1000).toFixed(
+                      tick % 1000 === 0 ? 0 : tick % 100 === 0 ? 1 : 2
+                    )}k`
                   : `€${Math.round(tick)}`}
               </text>
             </g>

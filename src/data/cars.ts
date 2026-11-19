@@ -30,6 +30,7 @@ export interface CarPreset {
   annualInsurance: number; // EUR/yr
   defaultSubsidy: number; // optional one-off subsidy EUR
   resalePct5Yr: number; // % of purchase price retained after 5 years
+  resalePctByYear: Record<1 | 3 | 5 | 8, number>; // realistic horizon retention %
 }
 
 export interface CarSlotConfig {
@@ -185,6 +186,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 940,
       defaultSubsidy: 0,
       resalePct5Yr: 47,
+      resalePctByYear: { 1: 78, 3: 59, 5: 47, 8: 31 },
     },
     sedan: {
       purchasePrice: 36500,
@@ -194,6 +196,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1100,
       defaultSubsidy: 0,
       resalePct5Yr: 46,
+      resalePctByYear: { 1: 77, 3: 58, 5: 46, 8: 30 },
     },
     suv: {
       purchasePrice: 41500,
@@ -203,6 +206,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1180,
       defaultSubsidy: 0,
       resalePct5Yr: 49,
+      resalePctByYear: { 1: 80, 3: 61, 5: 49, 8: 33 },
     },
   },
   diesel: {
@@ -214,6 +218,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 960,
       defaultSubsidy: 0,
       resalePct5Yr: 44,
+      resalePctByYear: { 1: 76, 3: 57, 5: 44, 8: 28 },
     },
     sedan: {
       purchasePrice: 39800,
@@ -223,6 +228,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1090,
       defaultSubsidy: 0,
       resalePct5Yr: 45,
+      resalePctByYear: { 1: 77, 3: 58, 5: 45, 8: 29 },
     },
     suv: {
       purchasePrice: 44800,
@@ -232,6 +238,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1180,
       defaultSubsidy: 0,
       resalePct5Yr: 47,
+      resalePctByYear: { 1: 79, 3: 60, 5: 47, 8: 31 },
     },
   },
   hybrid: {
@@ -247,6 +254,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1000,
       defaultSubsidy: 1500,
       resalePct5Yr: 52,
+      resalePctByYear: { 1: 80, 3: 63, 5: 52, 8: 35 },
     },
     sedan: {
       purchasePrice: 42900,
@@ -260,6 +268,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1140,
       defaultSubsidy: 1500,
       resalePct5Yr: 51,
+      resalePctByYear: { 1: 79, 3: 62, 5: 51, 8: 34 },
     },
     suv: {
       purchasePrice: 47900,
@@ -273,6 +282,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1230,
       defaultSubsidy: 1500,
       resalePct5Yr: 53,
+      resalePctByYear: { 1: 81, 3: 64, 5: 53, 8: 36 },
     },
   },
   electric: {
@@ -284,6 +294,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 960,
       defaultSubsidy: 3000,
       resalePct5Yr: 46,
+      resalePctByYear: { 1: 75, 3: 57, 5: 46, 8: 30 },
     },
     sedan: {
       purchasePrice: 44500,
@@ -293,6 +304,7 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1090,
       defaultSubsidy: 3000,
       resalePct5Yr: 47,
+      resalePctByYear: { 1: 76, 3: 58, 5: 47, 8: 31 },
     },
     suv: {
       purchasePrice: 48900,
@@ -302,14 +314,102 @@ export const CAR_PRESETS: Record<
       annualInsurance: 1190,
       defaultSubsidy: 3000,
       resalePct5Yr: 49,
+      resalePctByYear: { 1: 78, 3: 60, 5: 49, 8: 33 },
     },
   },
 };
 
+export function getPresetCurvePct(
+  powertrain: PowertrainId,
+  bodyClass: BodyClassId,
+  year: number
+): number {
+  if (year <= 0) return 100;
+  const map = CAR_PRESETS[powertrain][bodyClass].resalePctByYear;
+  const anchors: Array<[number, number]> = [
+    [0, 100],
+    [1, map[1]],
+    [3, map[3]],
+    [5, map[5]],
+    [8, map[8]],
+  ];
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const [y0, r0] = anchors[i];
+    const [y1, r1] = anchors[i + 1];
+    if (year <= y1) {
+      const frac = (year - y0) / (y1 - y0);
+      return r0 * Math.pow(r1 / r0, frac);
+    }
+  }
+  const annualTail = Math.pow(map[8] / map[5], 1 / 3);
+  return Math.max(10, map[8] * Math.pow(annualTail, year - 8));
+}
+
+export function getDefaultResalePct(
+  powertrain: PowertrainId,
+  bodyClass: BodyClassId,
+  years: number
+): number {
+  const map = CAR_PRESETS[powertrain][bodyClass].resalePctByYear;
+  if (years === 1 || years === 3 || years === 5 || years === 8) {
+    return map[years];
+  }
+  return Math.round(getPresetCurvePct(powertrain, bodyClass, years));
+}
+
+export function scaleResalePctForHorizon(
+  powertrain: PowertrainId,
+  bodyClass: BodyClassId,
+  currentResalePct: number,
+  fromYears: number,
+  toYears: number
+): number {
+  if (fromYears === toYears) return Math.round(currentResalePct);
+  const defaultFrom = getDefaultResalePct(powertrain, bodyClass, fromYears);
+  const defaultTo = getDefaultResalePct(powertrain, bodyClass, toYears);
+  if (Math.abs(currentResalePct - defaultFrom) <= 0.5) {
+    return defaultTo;
+  }
+  const baseFrom = Math.max(0.1, Math.min(0.95, defaultFrom / 100));
+  const userFrom = Math.max(0.1, Math.min(0.95, currentResalePct / 100));
+  const baseTo = Math.max(0.1, Math.min(0.95, defaultTo / 100));
+  const exponent = Math.log(userFrom) / Math.log(baseFrom);
+  const scaled = Math.pow(baseTo, Math.max(0.25, Math.min(3, exponent))) * 100;
+  return Math.max(10, Math.min(90, Math.round(scaled)));
+}
+
+export function interpolateResaleAtYear(
+  powertrain: PowertrainId,
+  bodyClass: BodyClassId,
+  targetResalePct: number,
+  targetYears: number,
+  atYear: number
+): number {
+  if (atYear <= 0) return 100;
+  if (atYear === targetYears) return targetResalePct;
+  const presetAtTarget = Math.max(
+    10,
+    getPresetCurvePct(powertrain, bodyClass, targetYears)
+  );
+  const presetAtY = Math.max(
+    10,
+    getPresetCurvePct(powertrain, bodyClass, atYear)
+  );
+  if (Math.abs(targetResalePct - Math.round(presetAtTarget)) <= 0.5) {
+    return Math.round(presetAtY);
+  }
+  const baseTarget = Math.max(0.1, Math.min(0.95, presetAtTarget / 100));
+  const userTarget = Math.max(0.1, Math.min(0.95, targetResalePct / 100));
+  const exponent = Math.log(userTarget) / Math.log(baseTarget);
+  const val = Math.pow(presetAtY / 100, Math.max(0.25, Math.min(3, exponent))) * 100;
+  return Math.max(10, Math.min(99, val));
+}
+
 export function createSlotFromPreset(
   slotId: string,
   powertrain: PowertrainId,
-  bodyClass: BodyClassId = 'sedan'
+  bodyClass: BodyClassId = 'sedan',
+  years = 1
 ): CarSlotConfig {
   const preset = CAR_PRESETS[powertrain][bodyClass];
   const hybridFallback = CAR_PRESETS.hybrid[bodyClass];
@@ -333,7 +433,7 @@ export function createSlotFromPreset(
     annualService: preset.annualService,
     annualTax: preset.annualTax,
     annualInsurance: preset.annualInsurance,
-    resalePct: preset.resalePct5Yr,
+    resalePct: getDefaultResalePct(powertrain, bodyClass, years),
   };
 }
 
@@ -404,7 +504,8 @@ export function getUnitPrice(
 
 export function calculateTco(
   car: CarSlotConfig,
-  assumptions: GlobalAssumptions
+  assumptions: GlobalAssumptions,
+  resaleHorizonYears?: number
 ): TcoResult {
   const isElectric = car.powertrain === 'electric';
   const isHybrid = car.powertrain === 'hybrid';
@@ -471,7 +572,17 @@ export function calculateTco(
       : 0;
   const netPurchasePrice = Math.max(0, car.purchasePrice - effectiveSubsidy);
 
-  const effectiveResalePct = scaledResalePct(car.resalePct, assumptions.years);
+  const sourceResaleHorizon = resaleHorizonYears ?? assumptions.years;
+  const effectiveResalePct =
+    sourceResaleHorizon !== assumptions.years
+      ? scaleResalePctForHorizon(
+          car.powertrain,
+          car.bodyClass,
+          car.resalePct,
+          sourceResaleHorizon,
+          assumptions.years
+        )
+      : car.resalePct;
   const resaleValue = car.purchasePrice * (effectiveResalePct / 100);
   const netDepreciation = Math.max(0, netPurchasePrice - resaleValue);
 
@@ -524,8 +635,14 @@ export function calculateTco(
           car.annualTax +
           car.annualInsurance) *
         y;
-      const retainedAtY =
-        car.purchasePrice * (scaledResalePct(car.resalePct, y) / 100);
+      const retainedPctAtY = interpolateResaleAtYear(
+        car.powertrain,
+        car.bodyClass,
+        effectiveResalePct,
+        assumptions.years,
+        y
+      );
+      const retainedAtY = car.purchasePrice * (retainedPctAtY / 100);
       const depAtY = Math.max(0, netPurchasePrice - retainedAtY);
       cumulativeNetByYear.push(depAtY + wallboxCost + runningToY);
       cumulativeByYear.push(netPurchasePrice + wallboxCost + runningToY);
@@ -609,10 +726,124 @@ export interface PairwiseCrossover {
   cheaperBelowIndex: number;
 }
 
+export interface SensitivityBoundsOptions {
+  focusXs?: number[];
+  focusChargeYs?: number[];
+}
+
+function buildDynamicAxisRange(
+  currentVal: number,
+  scenarioVals: number[],
+  kind: 'fuel' | 'elec',
+  candidateCrossovers: number[] = []
+): { min: number; max: number; ticks: number[] } {
+  const floor = kind === 'fuel' ? 0.35 : 0.05;
+  const ceil = kind === 'fuel' ? 3.8 : 1.5;
+  const steps =
+    kind === 'fuel'
+      ? [0.05, 0.1, 0.2, 0.25, 0.5]
+      : [0.02, 0.05, 0.1, 0.15, 0.2];
+  const minClusterSpan = kind === 'fuel' ? 0.34 : 0.14;
+  const minPad = kind === 'fuel' ? 0.09 : 0.035;
+  const defaultHalfWindow = kind === 'fuel' ? 0.5 : 0.18;
+  const nearCrossoverLimit = kind === 'fuel' ? 0.6 : 0.22;
+
+  const distinctScenarios = scenarioVals.filter(
+    (v) => Number.isFinite(v) && Math.abs(v - currentVal) > 0.002
+  );
+
+  let rawMin: number;
+  let rawMax: number;
+
+  if (distinctScenarios.length > 0) {
+    const pts = [currentVal, ...distinctScenarios];
+    const pMin = Math.min(...pts);
+    const pMax = Math.max(...pts);
+    const spread = pMax - pMin;
+    const pad = Math.max(
+      minPad,
+      spread < minClusterSpan ? (minClusterSpan - spread) / 2 : spread * 0.28
+    );
+    rawMin = pMin - pad;
+    rawMax = pMax + pad;
+  } else {
+    const nearCrosses = candidateCrossovers.filter(
+      (x) =>
+        Number.isFinite(x) &&
+        x >= floor &&
+        x <= ceil &&
+        Math.abs(x - currentVal) <= nearCrossoverLimit
+    );
+    if (nearCrosses.length > 0) {
+      const pts = [currentVal, ...nearCrosses];
+      const pMin = Math.min(...pts);
+      const pMax = Math.max(...pts);
+      const spread = pMax - pMin;
+      const targetMinWidth = kind === 'fuel' ? 0.72 : 0.26;
+      const pad = Math.max(
+        kind === 'fuel' ? 0.16 : 0.06,
+        spread < targetMinWidth ? (targetMinWidth - spread) / 2 : spread * 0.25
+      );
+      rawMin = pMin - pad;
+      rawMax = pMax + pad;
+    } else {
+      rawMin = currentVal - defaultHalfWindow;
+      rawMax = currentVal + defaultHalfWindow;
+    }
+  }
+
+  rawMin = Math.max(floor, rawMin);
+  rawMax = Math.min(ceil, rawMax);
+  if (rawMax - rawMin < minClusterSpan) {
+    const mid = (rawMin + rawMax) / 2;
+    rawMin = Math.max(floor, mid - minClusterSpan / 2);
+    rawMax = Math.min(ceil, rawMin + minClusterSpan);
+  }
+
+  const rawSpan = rawMax - rawMin;
+  let chosenStep = steps[steps.length - 1];
+  for (const st of steps) {
+    if (rawSpan / st <= 6.2) {
+      chosenStep = st;
+      break;
+    }
+  }
+
+  let min = Math.max(floor, Math.floor(rawMin / chosenStep) * chosenStep);
+  let max = Math.min(ceil, Math.ceil(rawMax / chosenStep) * chosenStep);
+  min = Number(min.toFixed(2));
+  max = Number(max.toFixed(2));
+  if (max - min < chosenStep * 2) {
+    max = Number(Math.min(ceil, min + chosenStep * 3).toFixed(2));
+  }
+
+  const ticks: number[] = [];
+  const startTick = Math.ceil((min - 1e-6) / chosenStep) * chosenStep;
+  for (let v = startTick; v <= max + 1e-6; v += chosenStep) {
+    const rounded = Number(v.toFixed(2));
+    if (rounded >= min - 1e-6 && rounded <= max + 1e-6) {
+      ticks.push(rounded);
+    }
+  }
+
+  // Ensure endpoints if edge ticks were sparse
+  if (ticks.length < 3) {
+    const count = 4;
+    const stepFallback = (max - min) / (count - 1);
+    ticks.length = 0;
+    for (let i = 0; i < count; i++) {
+      ticks.push(Number((min + i * stepFallback).toFixed(2)));
+    }
+  }
+
+  return { min, max, ticks };
+}
+
 export interface SensitivityAnalysis {
   mode: SensitivityMode;
   xMin: number;
   xMax: number;
+  xTicks: number[];
   currentX: number;
   unitLabel: string;
   lines: SensitivityLine[];
@@ -626,11 +857,9 @@ export interface SensitivityAnalysis {
 export function computeSensitivity(
   cars: CarSlotConfig[],
   assumptions: GlobalAssumptions,
-  mode: SensitivityMode
+  mode: SensitivityMode,
+  options?: SensitivityBoundsOptions
 ): SensitivityAnalysis {
-  const xMin = mode === 'fuel' ? 0.5 : 0.1;
-  const xMax = mode === 'fuel' ? 3.0 : 0.9;
-
   const hasGasOrHybrid = cars.some(
     (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'
   );
@@ -717,8 +946,14 @@ export function computeSensitivity(
     };
   });
 
-  const pairwise: PairwiseCrossover[] = [];
-  const internalCutPoints: number[] = [];
+  const rawCrossovers: Array<{
+    carAIndex: number;
+    carBIndex: number;
+    x: number;
+    y: number;
+    cheaperAboveIndex: number;
+    cheaperBelowIndex: number;
+  }> = [];
 
   for (let i = 0; i < lines.length; i++) {
     for (let j = i + 1; j < lines.length; j++) {
@@ -729,25 +964,42 @@ export function computeSensitivity(
 
       const x = (b.intercept - a.intercept) / slopeDiff;
       const y = a.evalAt(x);
-      const inRange = x > xMin + 1e-4 && x < xMax - 1e-4;
-      if (inRange) {
-        internalCutPoints.push(x);
-      }
-      const cheaperAboveIndex =
-        a.slope < b.slope ? a.carIndex : b.carIndex;
-      const cheaperBelowIndex =
-        a.slope < b.slope ? b.carIndex : a.carIndex;
+      const cheaperAboveIndex = a.slope < b.slope ? a.carIndex : b.carIndex;
+      const cheaperBelowIndex = a.slope < b.slope ? b.carIndex : a.carIndex;
 
-      pairwise.push({
+      rawCrossovers.push({
         carAIndex: a.carIndex,
         carBIndex: b.carIndex,
         x,
         y,
-        inRange,
         cheaperAboveIndex,
         cheaperBelowIndex,
       });
     }
+  }
+
+  const axisRange = buildDynamicAxisRange(
+    currentX,
+    options?.focusXs ?? [],
+    mode === 'fuel' ? 'fuel' : 'elec',
+    rawCrossovers.map((c) => c.x)
+  );
+  const xMin = axisRange.min;
+  const xMax = axisRange.max;
+  const xTicks = axisRange.ticks;
+
+  const pairwise: PairwiseCrossover[] = [];
+  const internalCutPoints: number[] = [];
+
+  for (const cross of rawCrossovers) {
+    const inRange = cross.x > xMin + 1e-4 && cross.x < xMax - 1e-4;
+    if (inRange) {
+      internalCutPoints.push(cross.x);
+    }
+    pairwise.push({
+      ...cross,
+      inRange,
+    });
   }
 
   internalCutPoints.sort((a, b) => a - b);
@@ -810,6 +1062,7 @@ export function computeSensitivity(
     mode,
     xMin,
     xMax,
+    xTicks,
     currentX,
     unitLabel,
     lines,
@@ -851,8 +1104,10 @@ export interface EnergyMapBreakingLine {
 export interface EnergyMap2DAnalysis {
   xMin: number;
   xMax: number;
+  xTicks: number[];
   yMin: number;
   yMax: number;
+  yTicks: number[];
   currentFuelX: number;
   currentChargeY: number;
   dieselTracksSpread: boolean;
@@ -987,13 +1242,9 @@ function clipLineToBox(
 
 export function computeEnergyMap2D(
   cars: CarSlotConfig[],
-  assumptions: GlobalAssumptions
+  assumptions: GlobalAssumptions,
+  options?: SensitivityBoundsOptions
 ): EnergyMap2DAnalysis {
-  const xMin = 0.5;
-  const xMax = 3.0;
-  const yMin = 0.1;
-  const yMax = 0.9;
-
   const hasGasOrHybrid = cars.some(
     (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'
   );
@@ -1005,6 +1256,24 @@ export function computeEnergyMap2D(
     ? assumptions.gasolinePrice
     : assumptions.dieselPrice;
   const currentChargeY = getBlendedElectricityPrice(assumptions);
+
+  const fuelAxis = buildDynamicAxisRange(
+    currentFuelX,
+    options?.focusXs ?? [],
+    'fuel'
+  );
+  const chargeAxis = buildDynamicAxisRange(
+    currentChargeY,
+    options?.focusChargeYs ?? [],
+    'elec'
+  );
+
+  const xMin = fuelAxis.min;
+  const xMax = fuelAxis.max;
+  const xTicks = fuelAxis.ticks;
+  const yMin = chargeAxis.min;
+  const yMax = chargeAxis.max;
+  const yTicks = chargeAxis.ticks;
 
   // Annual Energy Cost(x, y) = a * x + b * y + c
   const planes = cars.map((car) => {
@@ -1155,8 +1424,10 @@ export function computeEnergyMap2D(
   return {
     xMin,
     xMax,
+    xTicks,
     yMin,
     yMax,
+    yTicks,
     currentFuelX,
     currentChargeY,
     dieselTracksSpread,

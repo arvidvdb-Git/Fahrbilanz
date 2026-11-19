@@ -1,9 +1,81 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/</loc>
-    <lastmod>2026-11-13</lastmod>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/de/" />
+    <xhtml:link rel="alternate" hreflang="nl" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/nl/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/fr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/" />
+    <lastmod>2026-11-18</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/de/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/de/" />
+    <xhtml:link rel="alternate" hreflang="nl" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/nl/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/fr/" />
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/nl/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/de/" />
+    <xhtml:link rel="alternate" hreflang="nl" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/nl/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/fr/" />
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/fr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/de/" />
+    <xhtml:link rel="alternate" hreflang="nl" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/nl/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/fr/" />
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/ev-vs-petrol-germany</loc>
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/de/elektroauto-vs-benziner-deutschland</loc>
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/hybrid-vs-electric-suv-cost</loc>
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/nl/elektrische-auto-laadkosten-nederland</loc>
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/fr/voiture-electrique-vs-essence-france</loc>
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://ais-pre-cp26nw7nhtyns4ltmu2pcu-170487669521.europe-west3.run.app/en/diesel-vs-hybrid-vs-ev-europe</loc>
+    <lastmod>2026-11-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
   </url>
 </urlset>

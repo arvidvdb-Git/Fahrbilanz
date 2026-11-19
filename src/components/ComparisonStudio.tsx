@@ -25,10 +25,12 @@ import {
   extractScenarioRates,
   formatEur,
   getBlendedElectricityPrice,
+  getDefaultResalePct,
   getUnitPrice,
-  scaledResalePct,
+  scaleResalePctForHorizon,
 } from '../data/cars';
 import { Language, TRANSLATIONS } from '../i18n/translations';
+import { SEO_PRESETS, type SeoPresetId } from '../data/seoRoutes';
 import { LiveFuelFeed } from '../services/fuelPrices';
 import { CarSketch } from './CarSketch';
 import { ComparisonChart } from './ComparisonChart';
@@ -40,6 +42,7 @@ interface ComparisonStudioProps {
   lang: Language;
   fuelFeed: LiveFuelFeed | null;
   fuelFeedLoading: boolean;
+  activePresetId?: SeoPresetId;
 }
 
 interface NumericFieldProps {
@@ -210,9 +213,9 @@ function NumericField({
 }
 
 const DEFAULT_SLOTS: CarSlotConfig[] = [
-  createSlotFromPreset('slot-1', 'gasoline', 'sedan'),
-  createSlotFromPreset('slot-2', 'hybrid', 'sedan'),
-  createSlotFromPreset('slot-3', 'electric', 'sedan'),
+  createSlotFromPreset('slot-1', 'gasoline', 'sedan', 1),
+  createSlotFromPreset('slot-2', 'hybrid', 'sedan', 1),
+  createSlotFromPreset('slot-3', 'electric', 'sedan', 1),
 ];
 
 const LANG_DEFAULT_COUNTRY: Record<Language, string> = {
@@ -222,15 +225,75 @@ const LANG_DEFAULT_COUNTRY: Record<Language, string> = {
   fr: 'FR',
 };
 
+function buildPresetBundle(presetId: SeoPresetId) {
+  const spec = SEO_PRESETS[presetId] ?? SEO_PRESETS.home;
+  const fallbackThird: PowertrainId = spec.slots.some(
+    (s) => s.powertrain === 'electric'
+  )
+    ? spec.slots.some((s) => s.powertrain === 'hybrid')
+      ? 'gasoline'
+      : 'hybrid'
+    : 'electric';
+
+  const slot0 = createSlotFromPreset(
+    'slot-1',
+    spec.slots[0]?.powertrain ?? 'gasoline',
+    spec.slots[0]?.bodyClass ?? 'sedan',
+    spec.years
+  );
+  const slot1 = createSlotFromPreset(
+    'slot-2',
+    spec.slots[1]?.powertrain ?? 'hybrid',
+    spec.slots[1]?.bodyClass ?? 'sedan',
+    spec.years
+  );
+  const slot2 = createSlotFromPreset(
+    'slot-3',
+    spec.slots[2]?.powertrain ?? fallbackThird,
+    spec.slots[2]?.bodyClass ?? slot1.bodyClass,
+    spec.years
+  );
+
+  const builtAssumptions: GlobalAssumptions = {
+    comparisonMode: spec.comparisonMode,
+    annualKm: spec.annualKm,
+    years: spec.years,
+    gasolinePrice: 1.75,
+    dieselPrice: 1.68,
+    homeAcPrice: 0.3,
+    publicAcPrice: 0.49,
+    publicDcPrice: 0.69,
+    homeAcShare: spec.homeAcShare ?? 70,
+    publicAcShare: spec.publicAcShare ?? 20,
+    publicDcShare: spec.publicDcShare ?? 10,
+    monthlyChargingFee: 5,
+    wallboxCost: 1200,
+    rentWallboxElectric: true,
+    rentWallboxHybrid: false,
+    buyWallboxElectric: true,
+    buyWallboxHybrid: false,
+  };
+
+  return {
+    spec,
+    slots: [slot0, slot1, slot2],
+    assumptions: builtAssumptions,
+  };
+}
+
 export function ComparisonStudio({
   isDark,
   lang,
   fuelFeed,
   fuelFeedLoading,
+  activePresetId = 'home',
 }: ComparisonStudioProps) {
   const t = TRANSLATIONS[lang];
-  const [compareCount, setCompareCount] = useState<2 | 3>(3);
-  const [slots, setSlots] = useState<CarSlotConfig[]>(DEFAULT_SLOTS);
+  const initialBundle = buildPresetBundle(activePresetId);
+  const [compareCount, setCompareCount] = useState<2 | 3>(
+    initialBundle.spec.compareCount
+  );
+  const [slots, setSlots] = useState<CarSlotConfig[]>(initialBundle.slots);
   const [pendingPick, setPendingPick] = useState<PowertrainId[] | null>(null);
   const [mobileEditIdx, setMobileEditIdx] = useState<number>(0);
   const [customMixMode, setCustomMixMode] = useState<boolean>(false);
@@ -244,30 +307,14 @@ export function ComparisonStudio({
   const [sensitivityScope, setSensitivityScope] = useState<
     'all' | '0-1' | '0-2' | '1-2'
   >('all');
-  const [assumptions, setAssumptions] = useState<GlobalAssumptions>({
-    comparisonMode: 'energy',
-    annualKm: 15000,
-    years: 5,
-    gasolinePrice: 1.75,
-    dieselPrice: 1.68,
-    homeAcPrice: 0.3,
-    publicAcPrice: 0.49,
-    publicDcPrice: 0.69,
-    homeAcShare: 70,
-    publicAcShare: 20,
-    publicDcShare: 10,
-    monthlyChargingFee: 5,
-    wallboxCost: 1200,
-    rentWallboxElectric: true,
-    rentWallboxHybrid: false,
-    buyWallboxElectric: true,
-    buyWallboxHybrid: false,
-  });
+  const [assumptions, setAssumptions] = useState<GlobalAssumptions>(
+    initialBundle.assumptions
+  );
   const [draftAssumptions, setDraftAssumptions] =
-    useState<GlobalAssumptions>(assumptions);
+    useState<GlobalAssumptions>(initialBundle.assumptions);
   const initialSimRates: ScenarioRates = extractScenarioRates(
-    assumptions,
-    DEFAULT_SLOTS
+    initialBundle.assumptions,
+    initialBundle.slots.slice(0, initialBundle.spec.compareCount)
   );
   const [simRates, setSimRates] = useState<ScenarioRates>(initialSimRates);
   const [draftSimRates, setDraftSimRates] =
@@ -275,17 +322,23 @@ export function ComparisonStudio({
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
   const scenarioCounterRef = useRef<number>(1);
   const [selectedCountry, setSelectedCountry] = useState<string>(
-    LANG_DEFAULT_COUNTRY[lang]
+    activePresetId !== 'home'
+      ? initialBundle.spec.countryCode
+      : LANG_DEFAULT_COUNTRY[lang]
   );
   const [fuelCustomEdited, setFuelCustomEdited] = useState<boolean>(false);
   const userEditedFuelRef = useRef<boolean>(false);
   const userSelectedCountryRef = useRef<boolean>(false);
   const initialFeedSyncedRef = useRef<boolean>(false);
+  const appliedPresetRef = useRef<SeoPresetId>(activePresetId);
   const columnsRef = useRef<HTMLDivElement | null>(null);
   const mobileEditorRef = useRef<HTMLDivElement | null>(null);
   const simChartRef = useRef<HTMLDivElement | null>(null);
 
-  const defaultCountryForLang = LANG_DEFAULT_COUNTRY[lang];
+  const defaultCountryForLang =
+    activePresetId !== 'home'
+      ? SEO_PRESETS[activePresetId].countryCode
+      : LANG_DEFAULT_COUNTRY[lang];
 
   const resolveCountryInFeed = (feed: LiveFuelFeed, code: string) => {
     if (code === 'EU') return 'EU';
@@ -328,7 +381,50 @@ export function ComparisonStudio({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [simDialog]);
 
-  // Prefill Country Fuel Market & Gasoline/Diesel rates from top-right language setting
+  useEffect(() => {
+    if (appliedPresetRef.current === activePresetId) return;
+    appliedPresetRef.current = activePresetId;
+
+    const next = buildPresetBundle(activePresetId);
+    let nextAssumptions = next.assumptions;
+    let nextCountry =
+      activePresetId !== 'home'
+        ? next.spec.countryCode
+        : LANG_DEFAULT_COUNTRY[lang];
+
+    if (fuelFeed) {
+      nextCountry = resolveCountryInFeed(fuelFeed, nextCountry);
+      const rates = getPricesForCountry(fuelFeed, nextCountry);
+      nextAssumptions = {
+        ...nextAssumptions,
+        gasolinePrice: rates.gasoline,
+        dieselPrice: rates.diesel,
+      };
+    }
+
+    const nextActive = next.slots.slice(0, next.spec.compareCount);
+    const nextRates = extractScenarioRates(nextAssumptions, nextActive);
+
+    userSelectedCountryRef.current = false;
+    userEditedFuelRef.current = false;
+    setFuelCustomEdited(false);
+    setSelectedCountry(nextCountry);
+    setCompareCount(next.spec.compareCount);
+    setSlots(next.slots);
+    setPendingPick(null);
+    setMobileEditIdx(0);
+    setCustomMixMode(false);
+    setSimCustomMixMode(false);
+    setAssumptions(nextAssumptions);
+    setDraftAssumptions(nextAssumptions);
+    setSimRates(nextRates);
+    setDraftSimRates(nextRates);
+    setSavedScenarios([]);
+    setSensitivityScope('all');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePresetId]);
+
+  // Prefill Country Fuel Market & Gasoline/Diesel rates from active route or top-right language setting
   useEffect(() => {
     if (!fuelFeed) return;
     if (!userSelectedCountryRef.current) {
@@ -379,11 +475,40 @@ export function ComparisonStudio({
   };
 
   const handleCalculate = () => {
+    const prevYears = assumptions.years;
+    const nextYears = draftAssumptions.years;
     const nextSimRates = extractScenarioRates(draftAssumptions, activeCars);
     setAssumptions(draftAssumptions);
     setSimCustomMixMode(customMixMode);
     setSimRates(nextSimRates);
     setDraftSimRates(nextSimRates);
+    if (prevYears !== nextYears && savedScenarios.length > 0) {
+      setSavedScenarios((prev) =>
+        prev.map((sc) => {
+          if (!sc.rates.tcoBySlot) return sc;
+          const scaledMap: Record<string, { purchasePrice: number; resalePct: number }> = {};
+          for (const slot of slots) {
+            const ov = sc.rates.tcoBySlot[slot.slotId];
+            if (ov) {
+              scaledMap[slot.slotId] = {
+                purchasePrice: ov.purchasePrice,
+                resalePct: scaleResalePctForHorizon(
+                  slot.powertrain,
+                  slot.bodyClass,
+                  ov.resalePct,
+                  prevYears,
+                  nextYears
+                ),
+              };
+            }
+          }
+          return {
+            ...sc,
+            rates: { ...sc.rates, tcoBySlot: scaledMap },
+          };
+        })
+      );
+    }
     requestAnimationFrame(() => {
       columnsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -480,7 +605,9 @@ export function ComparisonStudio({
 
   const activeCars = slots.slice(0, compareCount);
   const effectiveEditIdx = mobileEditIdx >= compareCount ? 0 : mobileEditIdx;
-  const results = activeCars.map((car) => calculateTco(car, assumptions));
+  const results = activeCars.map((car) =>
+    calculateTco(car, assumptions, draftAssumptions.years)
+  );
 
   const sensitivityCars =
     compareCount === 2 || sensitivityScope === 'all'
@@ -530,12 +657,34 @@ export function ComparisonStudio({
     )
   );
 
+  const hasGasOrHybSens = sensitivityCars.some(
+    (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'
+  );
+  const visibleSavedScenarios = savedScenarios.filter((s) => s.visible);
+  const activeScenariosForAxes: ScenarioRates[] = [
+    ...(hasActiveSimulation ? [simRates] : []),
+    ...visibleSavedScenarios.map((s) => s.rates),
+  ];
+  const sensFuelFocusXs = activeScenariosForAxes.map((r) =>
+    hasGasOrHybSens ? r.gasolinePrice : r.dieselPrice
+  );
+  const sensElecFocusVals = activeScenariosForAxes.map((r) =>
+    getBlendedElectricityPrice({ ...assumptions, ...r })
+  );
+
   const sensitivity = computeSensitivity(
     sensitivityCars,
     assumptions,
-    sensitivityMode
+    sensitivityMode,
+    {
+      focusXs:
+        sensitivityMode === 'fuel' ? sensFuelFocusXs : sensElecFocusVals,
+    }
   );
-  const energyMap2D = computeEnergyMap2D(sensitivityCars, assumptions);
+  const energyMap2D = computeEnergyMap2D(sensitivityCars, assumptions, {
+    focusXs: sensFuelFocusXs,
+    focusChargeYs: sensElecFocusVals,
+  });
 
   const blendedElecPrice = getBlendedElectricityPrice(assumptions);
   const draftBlendedElecPrice = getBlendedElectricityPrice(draftAssumptions);
@@ -544,21 +693,17 @@ export function ComparisonStudio({
   const maxActiveTotal = Math.max(...results.map((r) => r.activeTotal), 1);
   const minEnergyCost = Math.min(...results.map((r) => r.totalEnergyCost));
 
-  const bestIdx = results.findIndex((r) => r.activeTotal === minActiveTotal);
-  const worstIdx = results.reduce(
-    (maxI, r, i, arr) => (r.activeTotal > arr[maxI].activeTotal ? i : maxI),
-    0
-  );
+  const sortedByCost = results
+    .map((r, i) => ({ idx: i, total: r.activeTotal }))
+    .sort((a, b) => a.total - b.total);
+  const bestIdx = sortedByCost[0]?.idx ?? 0;
+  const runnerUp = sortedByCost[1];
+  const worstIdx = sortedByCost[sortedByCost.length - 1]?.idx ?? bestIdx;
   const bestCar = activeCars[bestIdx];
   const worstCar = activeCars[worstIdx];
   const bestRes = results[bestIdx];
   const worstRes = results[worstIdx];
   const totalSavings = worstRes.activeTotal - bestRes.activeTotal;
-
-  const sortedByCost = results
-    .map((r, i) => ({ idx: i, total: r.activeTotal }))
-    .sort((a, b) => a.total - b.total);
-  const runnerUp = sortedByCost[1];
   const runnerUpGap = runnerUp ? runnerUp.total - bestRes.activeTotal : 0;
 
   const hasElectric = activeCars.some((c) => c.powertrain === 'electric');
@@ -582,7 +727,7 @@ export function ComparisonStudio({
   ): CarSlotConfig => {
     const match = existingPool.find((c) => c.powertrain === pt);
     if (match) return { ...match, slotId };
-    return createSlotFromPreset(slotId, pt, fallbackBody);
+    return createSlotFromPreset(slotId, pt, fallbackBody, draftAssumptions.years);
   };
 
   const handleSetCompareCount = (nextCount: 2 | 3) => {
@@ -669,7 +814,8 @@ export function ComparisonStudio({
       const nextThird = createSlotFromPreset(
         'slot-3',
         pt,
-        activeCars[0].bodyClass
+        activeCars[0].bodyClass,
+        draftAssumptions.years
       );
       const nextSlots = [activeCars[0], activeCars[1], nextThird];
       setSlots(nextSlots);
@@ -679,7 +825,12 @@ export function ComparisonStudio({
       const nextSlots = [
         slots[0],
         slots[1],
-        createSlotFromPreset('slot-3', pt, slots[2].bodyClass),
+        createSlotFromPreset(
+          'slot-3',
+          pt,
+          slots[2].bodyClass,
+          draftAssumptions.years
+        ),
       ];
       setSlots(nextSlots);
       syncSimSlotsList(nextSlots);
@@ -695,9 +846,24 @@ export function ComparisonStudio({
       if (mobileEditIdx >= 2) setMobileEditIdx(0);
     }
     const nextSlots = [
-      createSlotFromPreset('slot-1', types[0], slots[0].bodyClass),
-      createSlotFromPreset('slot-2', types[1], slots[1].bodyClass),
-      createSlotFromPreset('slot-3', types[2] ?? 'electric', slots[2].bodyClass),
+      createSlotFromPreset(
+        'slot-1',
+        types[0],
+        slots[0].bodyClass,
+        draftAssumptions.years
+      ),
+      createSlotFromPreset(
+        'slot-2',
+        types[1],
+        slots[1].bodyClass,
+        draftAssumptions.years
+      ),
+      createSlotFromPreset(
+        'slot-3',
+        types[2] ?? 'electric',
+        slots[2].bodyClass,
+        draftAssumptions.years
+      ),
     ];
     setSlots(nextSlots);
     syncSimSlotsList(nextSlots);
@@ -758,7 +924,8 @@ export function ComparisonStudio({
     const nextSlot = createSlotFromPreset(
       target.slotId,
       nextPt,
-      target.bodyClass
+      target.bodyClass,
+      draftAssumptions.years
     );
     setSlots((prev) => prev.map((slot, i) => (i === idx ? nextSlot : slot)));
     syncSimSlotFromBase(nextSlot);
@@ -769,7 +936,8 @@ export function ComparisonStudio({
     const nextSlot = createSlotFromPreset(
       target.slotId,
       target.powertrain,
-      nextBody
+      nextBody,
+      draftAssumptions.years
     );
     setSlots((prev) => prev.map((slot, i) => (i === idx ? nextSlot : slot)));
     syncSimSlotFromBase(nextSlot);
@@ -851,10 +1019,32 @@ export function ComparisonStudio({
       annualService: preset.annualService,
       annualTax: preset.annualTax,
       annualInsurance: preset.annualInsurance,
-      resalePct: preset.resalePct5Yr,
+      resalePct: getDefaultResalePct(
+        target.powertrain,
+        target.bodyClass,
+        draftAssumptions.years
+      ),
     };
     setSlots((prev) => prev.map((slot, i) => (i === idx ? resetSlot : slot)));
     syncSimSlotFromBase(resetSlot);
+  };
+
+  const handleHorizonChange = (nextYears: number) => {
+    const prevYears = draftAssumptions.years;
+    if (prevYears === nextYears) return;
+    setDraftAssumptions((prev) => ({ ...prev, years: nextYears }));
+    setSlots((prevSlots) =>
+      prevSlots.map((slot) => ({
+        ...slot,
+        resalePct: scaleResalePctForHorizon(
+          slot.powertrain,
+          slot.bodyClass,
+          slot.resalePct,
+          prevYears,
+          nextYears
+        ),
+      }))
+    );
   };
 
   const updateChargingShare = (
@@ -1007,11 +1197,24 @@ export function ComparisonStudio({
   const bestMeta = POWERTRAIN_META[bestCar.powertrain];
   const bestAccent = isDark ? bestMeta.darkColor : bestMeta.color;
 
+  const activeRouteMeta =
+    activePresetId !== 'home' ? SEO_PRESETS[activePresetId].meta[lang] : null;
+
   return (
     <section id="compare" className="compare-section">
       <div className="container">
         <div className="compare-header-row">
           <div>
+            {activeRouteMeta && (
+              <div className="studio-preset-pill">
+                <span className="studio-preset-badge">
+                  {activeRouteMeta.badge}
+                </span>
+                <span className="studio-preset-summary">
+                  {activeRouteMeta.heading}
+                </span>
+              </div>
+            )}
             <h2 className="section-title">{t.studio.title}</h2>
             <p className="section-sub">{t.studio.sub}</p>
           </div>
@@ -1221,9 +1424,7 @@ export function ComparisonStudio({
                     className={`horizon-btn${
                       draftAssumptions.years === yr ? ' is-active' : ''
                     }`}
-                    onClick={() =>
-                      setDraftAssumptions((prev) => ({ ...prev, years: yr }))
-                    }
+                    onClick={() => handleHorizonChange(yr)}
                   >
                     {t.studio.yrButton(yr)}
                   </button>
@@ -1834,6 +2035,9 @@ export function ComparisonStudio({
                   </div>
 
                   <div className="slot-inputs-grid">
+                    <div className="slot-input-subheading">
+                      {t.studio.groupConsumption}
+                    </div>
                     {editCar.powertrain === 'hybrid' ? (
                       <>
                         <label className="slot-input-item">
@@ -1955,6 +2159,10 @@ export function ComparisonStudio({
 
                     {!isEnergyOnly && (
                       <>
+                        <div className="slot-input-subheading">
+                          {t.studio.groupPurchaseResale}
+                        </div>
+
                         <label className="slot-input-item">
                           <span className="slot-input-label">
                             {t.studio.purchasePriceLabel}
@@ -1974,6 +2182,30 @@ export function ComparisonStudio({
                             className="slot-num-input tabular-nums"
                           />
                         </label>
+
+                        <label className="slot-input-item">
+                          <span className="slot-input-label">
+                            {t.studio.resaleLabel(draftAssumptions.years)}
+                          </span>
+                          <NumericField
+                            min={10}
+                            max={90}
+                            decimals={0}
+                            value={editCar.resalePct}
+                            onValueChange={(nextVal) =>
+                              updateSlotField(
+                                effectiveEditIdx,
+                                'resalePct',
+                                nextVal
+                              )
+                            }
+                            className="slot-num-input tabular-nums"
+                          />
+                        </label>
+
+                        <div className="slot-input-subheading">
+                          {t.studio.groupYearlyCosts}
+                        </div>
 
                         <label className="slot-input-item">
                           <span className="slot-input-label">
@@ -2028,26 +2260,6 @@ export function ComparisonStudio({
                               updateSlotField(
                                 effectiveEditIdx,
                                 'annualInsurance',
-                                nextVal
-                              )
-                            }
-                            className="slot-num-input tabular-nums"
-                          />
-                        </label>
-
-                        <label className="slot-input-item">
-                          <span className="slot-input-label">
-                            {t.studio.resaleLabel}
-                          </span>
-                          <NumericField
-                            min={10}
-                            max={90}
-                            decimals={0}
-                            value={editCar.resalePct}
-                            onValueChange={(nextVal) =>
-                              updateSlotField(
-                                effectiveEditIdx,
-                                'resalePct',
                                 nextVal
                               )
                             }
@@ -2419,10 +2631,16 @@ export function ComparisonStudio({
             const color = isDark ? meta.darkColor : meta.color;
             const isWinner = idx === bestIdx;
             const deltaVsWinner = res.activeTotal - minActiveTotal;
-            const effResalePct = scaledResalePct(
-              car.resalePct,
-              assumptions.years
-            );
+            const effResalePct =
+              draftAssumptions.years !== assumptions.years
+                ? scaleResalePctForHorizon(
+                    car.powertrain,
+                    car.bodyClass,
+                    car.resalePct,
+                    draftAssumptions.years,
+                    assumptions.years
+                  )
+                : car.resalePct;
 
             const depW = isEnergyOnly
               ? 0
@@ -2646,6 +2864,9 @@ export function ComparisonStudio({
 
                 {/* Editable Vehicle Spec Inputs */}
                 <div className="slot-inputs-grid">
+                  <div className="slot-input-subheading">
+                    {t.studio.groupConsumption}
+                  </div>
                   {car.powertrain === 'hybrid' ? (
                     <>
                       <label className="slot-input-item">
@@ -2753,6 +2974,10 @@ export function ComparisonStudio({
 
                   {!isEnergyOnly && (
                     <>
+                      <div className="slot-input-subheading">
+                        {t.studio.groupPurchaseResale}
+                      </div>
+
                       <label className="slot-input-item">
                         <span className="slot-input-label">
                           {t.studio.purchasePriceLabel}
@@ -2768,6 +2993,26 @@ export function ComparisonStudio({
                           className="slot-num-input tabular-nums"
                         />
                       </label>
+
+                      <label className="slot-input-item">
+                        <span className="slot-input-label">
+                          {t.studio.resaleLabel(draftAssumptions.years)}
+                        </span>
+                        <NumericField
+                          min={10}
+                          max={90}
+                          decimals={0}
+                          value={car.resalePct}
+                          onValueChange={(nextVal) =>
+                            updateSlotField(idx, 'resalePct', nextVal)
+                          }
+                          className="slot-num-input tabular-nums"
+                        />
+                      </label>
+
+                      <div className="slot-input-subheading">
+                        {t.studio.groupYearlyCosts}
+                      </div>
 
                       <label className="slot-input-item">
                         <span className="slot-input-label">
@@ -2812,22 +3057,6 @@ export function ComparisonStudio({
                           value={car.annualInsurance}
                           onValueChange={(nextVal) =>
                             updateSlotField(idx, 'annualInsurance', nextVal)
-                          }
-                          className="slot-num-input tabular-nums"
-                        />
-                      </label>
-
-                      <label className="slot-input-item">
-                        <span className="slot-input-label">
-                          {t.studio.resaleLabel}
-                        </span>
-                        <NumericField
-                          min={10}
-                          max={90}
-                          decimals={0}
-                          value={car.resalePct}
-                          onValueChange={(nextVal) =>
-                            updateSlotField(idx, 'resalePct', nextVal)
                           }
                           className="slot-num-input tabular-nums"
                         />
@@ -3087,18 +3316,31 @@ export function ComparisonStudio({
             </h3>
             <p className="winner-sub">
               {runnerUpGap > 1 && runnerUp
-                ? t.studio.savesSummary(
-                    formatEur(runnerUpGap, 0, t.locale),
-                    formatEur(
-                      runnerUpGap / (assumptions.years * 12),
-                      0,
-                      t.locale
-                    ),
-                    runnerUp.idx + 1,
-                    t.powertrains[activeCars[runnerUp.idx].powertrain].shortLabel,
-                    formatEur(totalSavings, 0, t.locale),
-                    t.powertrains[worstCar.powertrain].shortLabel
-                  )
+                ? activeCars.length === 2
+                  ? t.studio.savesSummaryTwo(
+                      formatEur(runnerUpGap, 0, t.locale),
+                      formatEur(
+                        runnerUpGap / (assumptions.years * 12),
+                        0,
+                        t.locale
+                      ),
+                      runnerUp.idx + 1,
+                      t.powertrains[activeCars[runnerUp.idx].powertrain]
+                        .shortLabel
+                    )
+                  : t.studio.savesSummary(
+                      formatEur(runnerUpGap, 0, t.locale),
+                      formatEur(
+                        runnerUpGap / (assumptions.years * 12),
+                        0,
+                        t.locale
+                      ),
+                      runnerUp.idx + 1,
+                      t.powertrains[activeCars[runnerUp.idx].powertrain]
+                        .shortLabel,
+                      formatEur(totalSavings, 0, t.locale),
+                      t.powertrains[worstCar.powertrain].shortLabel
+                    )
                 : t.studio.tiedSummary}
             </p>
           </div>
@@ -4384,7 +4626,7 @@ export function ComparisonStudio({
 
                             <label className="sim-energy-field">
                               <span className="assumption-label">
-                                {t.studio.resaleLabel}
+                                {t.studio.resaleLabel(assumptions.years)}
                               </span>
                               <NumericField
                                 min={10}

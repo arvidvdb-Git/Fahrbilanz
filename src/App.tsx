@@ -22,8 +22,15 @@ import {
   TRANSLATIONS,
 } from './i18n/translations';
 import { LiveFuelFeed, fetchLiveFuelFeed } from './services/fuelPrices';
+import {
+  SEO_PRESETS,
+  type SeoPresetId,
+  buildHreflangLinks,
+  resolveSeoRoute,
+} from './data/seoRoutes';
 import { CarSketch } from './components/CarSketch';
 import { ComparisonStudio } from './components/ComparisonStudio';
+import { MethodologySection } from './components/MethodologySection';
 
 import showcaseGasolineImg from './assets/images/showcase_gasoline_fixed_1794565586901.jpg';
 import showcaseDieselImg from './assets/images/showcase_diesel_1794557659134.jpg';
@@ -93,8 +100,16 @@ const LANG_DEFAULT_COUNTRY: Record<Language, string> = {
 };
 
 export default function App() {
+  const [initialRoute] = useState(() =>
+    typeof window !== 'undefined'
+      ? resolveSeoRoute(window.location.pathname)
+      : { lang: 'en' as Language, presetId: 'home' as SeoPresetId, canonicalPath: '/en/', isExplicitLangRoute: false }
+  );
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [lang, setLang] = useState<Language>('en');
+  const [lang, setLang] = useState<Language>(initialRoute.lang);
+  const [activePresetId, setActivePresetId] = useState<SeoPresetId>(
+    initialRoute.presetId
+  );
   const [langMenuOpen, setLangMenuOpen] = useState<boolean>(false);
   const [activeNav, setActiveNav] = useState<string>('');
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
@@ -236,24 +251,35 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    const presetCopy = SEO_PRESETS[activePresetId].meta[lang];
+    const pageTitle = presetCopy.title;
+    const pageDesc = presetCopy.description;
     document.documentElement.lang = lang;
-    document.title = t.seo.title;
+    document.title = pageTitle;
 
     const origin = window.location.origin;
-    const canonicalUrl = origin + window.location.pathname;
+    const canonicalPath = SEO_PRESETS[activePresetId].paths[lang];
+    const canonicalUrl = `${origin}${canonicalPath}`;
     const ogImgUrl = `${origin}/og-image.png`;
+    const ogLocaleMap: Record<Language, string> = {
+      en: 'en_IE',
+      de: 'de_DE',
+      nl: 'nl_NL',
+      fr: 'fr_FR',
+    };
 
     const setMetaContent = (selector: string, content: string) => {
       const el = document.querySelector(selector);
       if (el) el.setAttribute('content', content);
     };
-    setMetaContent('meta[name="description"]', t.seo.description);
-    setMetaContent('meta[property="og:title"]', t.seo.title);
-    setMetaContent('meta[property="og:description"]', t.seo.description);
+    setMetaContent('meta[name="description"]', pageDesc);
+    setMetaContent('meta[property="og:title"]', pageTitle);
+    setMetaContent('meta[property="og:description"]', pageDesc);
     setMetaContent('meta[property="og:url"]', canonicalUrl);
     setMetaContent('meta[property="og:image"]', ogImgUrl);
-    setMetaContent('meta[name="twitter:title"]', t.seo.title);
-    setMetaContent('meta[name="twitter:description"]', t.seo.description);
+    setMetaContent('meta[property="og:locale"]', ogLocaleMap[lang]);
+    setMetaContent('meta[name="twitter:title"]', pageTitle);
+    setMetaContent('meta[name="twitter:description"]', pageDesc);
     setMetaContent('meta[name="twitter:image"]', ogImgUrl);
 
     let canonical = document.querySelector('link[rel="canonical"]');
@@ -263,11 +289,26 @@ export default function App() {
       document.head.appendChild(canonical);
     }
     canonical.setAttribute('href', canonicalUrl);
-  }, [lang, t]);
+
+    document
+      .querySelectorAll('link[rel="alternate"][data-fbz-hreflang]')
+      .forEach((node) => node.remove());
+    for (const alt of buildHreflangLinks(origin, activePresetId)) {
+      const link = document.createElement('link');
+      link.setAttribute('rel', 'alternate');
+      link.setAttribute('hreflang', alt.hreflang);
+      link.setAttribute('href', alt.href);
+      link.setAttribute('data-fbz-hreflang', 'true');
+      document.head.appendChild(link);
+    }
+  }, [lang, activePresetId, t]);
 
   useEffect(() => {
     const syncRoute = () => {
       setPageView(resolvePageView());
+      const nextSeo = resolveSeoRoute(window.location.pathname);
+      setLang(nextSeo.lang);
+      setActivePresetId(nextSeo.presetId);
       setMobileMenuOpen(false);
     };
     window.addEventListener('hashchange', syncRoute);
@@ -609,9 +650,39 @@ export default function App() {
 
   const returnToHome = () => {
     setMobileMenuOpen(false);
-    window.history.replaceState(null, '', '#hero');
+    const targetUrl = `${SEO_PRESETS[activePresetId].paths[lang]}#hero`;
+    window.history.replaceState(null, '', targetUrl);
     setPageView('home');
     window.scrollTo({ top: 0, behavior: 'auto' });
+  };
+
+  const handleSelectLanguage = (nextLang: Language) => {
+    setLang(nextLang);
+    setLangMenuOpen(false);
+    const nextPath = SEO_PRESETS[activePresetId].paths[nextLang];
+    const hash = window.location.hash || '';
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState(null, '', `${nextPath}${hash}`);
+    }
+  };
+
+  const handleSelectPreset = (
+    presetId: SeoPresetId,
+    e: React.MouseEvent<HTMLAnchorElement>
+  ) => {
+    e.preventDefault();
+    setMobileMenuOpen(false);
+    setPageView('home');
+    setActivePresetId(presetId);
+    const nextPath = `${SEO_PRESETS[presetId].paths[lang]}#compare`;
+    window.history.pushState(null, '', nextPath);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .getElementById('compare')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
   };
 
   const handleCookieChoice = (choice: 'allowed' | 'essential') => {
@@ -738,16 +809,16 @@ export default function App() {
   const heroText = t.powertrains[heroPowertrain];
   const heroPreset = CAR_PRESETS[heroPowertrain].sedan;
   const heroTco = calculateTco(
-    createSlotFromPreset('hero-preview', heroPowertrain, 'sedan'),
+    createSlotFromPreset('hero-preview', heroPowertrain, 'sedan', 5),
     syncedAssumptions
   );
 
   const sliderGasTco = calculateTco(
-    createSlotFromPreset('slider-gas', 'gasoline', 'sedan'),
+    createSlotFromPreset('slider-gas', 'gasoline', 'sedan', 5),
     { ...syncedAssumptions, comparisonMode: 'energy' }
   );
   const sliderEvTco = calculateTco(
-    createSlotFromPreset('slider-ev', 'electric', 'sedan'),
+    createSlotFromPreset('slider-ev', 'electric', 'sedan', 5),
     { ...syncedAssumptions, comparisonMode: 'energy' }
   );
   const sliderAnnualDiff = Math.max(
@@ -975,10 +1046,7 @@ export default function App() {
                       className={`lang-menu-item${
                         lang === code ? ' is-active' : ''
                       }`}
-                      onClick={() => {
-                        setLang(code);
-                        setLangMenuOpen(false);
-                      }}
+                      onClick={() => handleSelectLanguage(code)}
                     >
                       <span className="lang-menu-code">
                         {LANGUAGE_LABELS[code].code}
@@ -1602,6 +1670,14 @@ export default function App() {
           lang={lang}
           fuelFeed={fuelFeed}
           fuelFeedLoading={fuelFeedLoading}
+          activePresetId={activePresetId}
+        />
+
+        {/* SECTION 6: Methodology & Formula Transparency + Pre-Configured Comparison Guides */}
+        <MethodologySection
+          lang={lang}
+          activePresetId={activePresetId}
+          onSelectPreset={handleSelectPreset}
         />
       </main>
       )}

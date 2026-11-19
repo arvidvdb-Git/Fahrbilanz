@@ -157,8 +157,10 @@ export function EnergyMap2DChart({
   const {
     xMin,
     xMax,
+    xTicks,
     yMin,
     yMax,
+    yTicks,
     currentFuelX,
     currentChargeY,
     zones,
@@ -170,9 +172,6 @@ export function EnergyMap2DChart({
     padLeft + ((x - xMin) / (xMax - xMin)) * plotW;
   const yForCharge = (y: number) =>
     padTop + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
-
-  const xTicks = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
-  const yTicks = [0.1, 0.3, 0.5, 0.7, 0.9];
 
   const hasGasOrHybrid = cars.some(
     (c) => c.powertrain === 'gasoline' || c.powertrain === 'hybrid'

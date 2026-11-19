@@ -195,6 +195,12 @@ export interface Translations {
       totalSavingsStr: string,
       worstPt: string
     ) => string;
+    savesSummaryTwo: (
+      gapStr: string,
+      monthlyStr: string,
+      runnerIdx: number,
+      runnerPt: string
+    ) => string;
     tiedSummary: string;
     winnerPerMonth: string;
     winnerPerKm: string;
@@ -220,11 +226,14 @@ export interface Translations {
     hybridFuelUsedLabel: string;
     hybridElecChargedLabel: string;
     hybridShortCardNote: (fwStr: string, rangeKm: number) => string;
+    groupConsumption: string;
+    groupPurchaseResale: string;
+    groupYearlyCosts: string;
     purchasePriceLabel: string;
     serviceYrLabel: string;
     roadTaxYrLabel: string;
     insuranceYrLabel: string;
-    resaleLabel: string;
+    resaleLabel: (years: number) => string;
     optionalSubsidy: string;
     depreciationLabel: (lossPct: number, subsidyNote: string) => string;
     subsidyNote: (amtStr: string) => string;
@@ -648,6 +657,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         `Car ${num}: ${pt} ${body} wins at ${total}`,
       savesSummary: (gap, monthly, rIdx, rPt, totalSav, worstPt) =>
         `Saves ${gap} (${monthly}/mo) ahead of Car ${rIdx} (${rPt}) and ${totalSav} vs. ${worstPt}.`,
+      savesSummaryTwo: (gap, monthly, rIdx, rPt) =>
+        `Saves ${gap} (${monthly}/mo) compared to Car ${rIdx} (${rPt}).`,
       tiedSummary:
         'Currently tied for lowest cost under your selected assumptions.',
       winnerPerMonth: 'Winner / month',
@@ -678,11 +689,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       hybridElecChargedLabel: 'Electricity billed',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km EV`,
+      groupConsumption: 'Consumption',
+      groupPurchaseResale: 'Purchase and reselling',
+      groupYearlyCosts: 'Yearly costs',
       purchasePriceLabel: 'Purchase Price (€)',
       serviceYrLabel: 'Service / yr (€)',
       roadTaxYrLabel: 'Road Tax / yr (€)',
       insuranceYrLabel: 'Insurance / yr (€)',
-      resaleLabel: '5-Yr Resale (%)',
+      resaleLabel: (years) => `${years}-Yr Resale (%)`,
       optionalSubsidy: 'Optional subsidy',
       depreciationLabel: (loss, note) => `Depreciation (${loss}% loss${note})`,
       subsidyNote: (amt) => ` · −${amt} subsidy`,
@@ -1106,6 +1120,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         `Auto ${num}: ${pt} (${body}) gewinnt mit ${total}`,
       savesSummary: (gap, monthly, rIdx, rPt, totalSav, worstPt) =>
         `Spart ${gap} (${monthly}/Mo) vor Auto ${rIdx} (${rPt}) und ${totalSav} gegenüber ${worstPt}.`,
+      savesSummaryTwo: (gap, monthly, rIdx, rPt) =>
+        `Spart ${gap} (${monthly}/Mo) im Vergleich zu Auto ${rIdx} (${rPt}).`,
       tiedSummary: 'Aktuell gleichauf bei den gewählten Annahmen.',
       winnerPerMonth: 'Sieger / Monat',
       winnerPerKm: 'Sieger / km',
@@ -1135,11 +1151,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       hybridElecChargedLabel: 'Abgerechneter Strom',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km E-R.`,
+      groupConsumption: 'Verbrauch',
+      groupPurchaseResale: 'Kauf & Wiederverkauf',
+      groupYearlyCosts: 'Jährliche Kosten',
       purchasePriceLabel: 'Kaufpreis (€)',
       serviceYrLabel: 'Wartung / J. (€)',
       roadTaxYrLabel: 'Kfz-Steuer / J. (€)',
       insuranceYrLabel: 'Versicherung / J. (€)',
-      resaleLabel: '5-J. Restwert (%)',
+      resaleLabel: (years) => `${years}-J. Restwert (%)`,
       optionalSubsidy: 'Optionale Förderung',
       depreciationLabel: (loss, note) => `Wertverlust (${loss}% Minus${note})`,
       subsidyNote: (amt) => ` · −${amt} Förderung`,
@@ -1563,6 +1582,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         `Auto ${num}: ${pt} (${body}) wint met ${total}`,
       savesSummary: (gap, monthly, rIdx, rPt, totalSav, worstPt) =>
         `Bespaart ${gap} (${monthly}/mnd) voor Auto ${rIdx} (${rPt}) en ${totalSav} t.o.v. ${worstPt}.`,
+      savesSummaryTwo: (gap, monthly, rIdx, rPt) =>
+        `Bespaart ${gap} (${monthly}/mnd) ten opzichte van Auto ${rIdx} (${rPt}).`,
       tiedSummary: 'Momenteel gelijkspel onder de gekozen aannames.',
       winnerPerMonth: 'Winnaar / mnd',
       winnerPerKm: 'Winnaar / km',
@@ -1592,11 +1613,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       hybridElecChargedLabel: 'Geladen elektriciteit',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km EV`,
+      groupConsumption: 'Verbruik',
+      groupPurchaseResale: 'Aankoop & restwaarde',
+      groupYearlyCosts: 'Jaarlijkse kosten',
       purchasePriceLabel: 'Aankoopprijs (€)',
       serviceYrLabel: 'Onderhoud / jr (€)',
       roadTaxYrLabel: 'Wegenbelasting / jr (€)',
       insuranceYrLabel: 'Verzekering / jr (€)',
-      resaleLabel: '5-jr Restwaarde (%)',
+      resaleLabel: (years) => `${years}-jr Restwaarde (%)`,
       optionalSubsidy: 'Optionele subsidie',
       depreciationLabel: (loss, note) => `Afschrijving (${loss}% verlies${note})`,
       subsidyNote: (amt) => ` · −${amt} subsidie`,
@@ -2020,6 +2044,8 @@ export const TRANSLATIONS: Record<Language, Translations> = {
         `Voiture ${num} : ${pt} (${body}) gagne à ${total}`,
       savesSummary: (gap, monthly, rIdx, rPt, totalSav, worstPt) =>
         `Économise ${gap} (${monthly}/mois) devant Voiture ${rIdx} (${rPt}) et ${totalSav} face à ${worstPt}.`,
+      savesSummaryTwo: (gap, monthly, rIdx, rPt) =>
+        `Économise ${gap} (${monthly}/mois) par rapport à Voiture ${rIdx} (${rPt}).`,
       tiedSummary: 'Actuellement à égalité selon vos paramètres.',
       winnerPerMonth: 'Gagnant / mois',
       winnerPerKm: 'Gagnant / km',
@@ -2049,11 +2075,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       hybridElecChargedLabel: 'Électricité facturée',
       hybridShortCardNote: (fwStr, rangeKm) =>
         `${fwStr} L/100 km · ${rangeKm} km EV`,
+      groupConsumption: 'Consommation',
+      groupPurchaseResale: 'Achat & revente',
+      groupYearlyCosts: 'Coûts annuels',
       purchasePriceLabel: 'Prix d’achat (€)',
       serviceYrLabel: 'Entretien / an (€)',
       roadTaxYrLabel: 'Taxe / an (€)',
       insuranceYrLabel: 'Assurance / an (€)',
-      resaleLabel: 'Revente 5 ans (%)',
+      resaleLabel: (years) => (years === 1 ? 'Revente 1 an (%)' : `Revente ${years} ans (%)`),
       optionalSubsidy: 'Bonus optionnel',
       depreciationLabel: (loss, note) => `Décote (${loss}% perte${note})`,
       subsidyNote: (amt) => ` · −${amt} bonus`,
